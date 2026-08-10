@@ -1,17 +1,21 @@
+```javascript
 const {
     addonBuilder,
     serveHTTP
 } = require("stremio-addon-sdk");
 
 const manifest = {
-    id: "com.example.mdblist-history",
-    version: "1.0.0",
+    id: "com.example.mdblist-recently-watched",
+    version: "2.0.0",
+
     name: "MDBList Recently Watched",
-    description: "Shows recently watched MDBList episodes and movies.",
+
+    description:
+        "Shows your recently watched MDBList episodes.",
 
     resources: ["catalog"],
 
-    types: ["movie", "series"],
+    types: ["series"],
 
     catalogs: [
         {
@@ -40,390 +44,472 @@ const builder = new addonBuilder(manifest);
 
 
 /*
- * Fetch watched episodes from MDBList.
+ * MDBList history endpoint.
  *
- * MDBList documents mediatype=episode for
- * /sync/watched.
- */
-async function getWatchedEpisodes(apiKey) {
-
-    const params = new URLSearchParams({
-        apikey: apiKey,
-        mediatype: "episode",
-        limit: "1000",
-        append_to_response: "poster"
-    });
-
-    const response = await fetch(
-        `https://api.mdblist.com/sync/watched?${params}`
-    );
-
-    const text = await response.text();
-
-    console.log(
-        "MDBList episode request:",
-        response.status
-    );
-
-    if (!response.ok) {
-        throw new Error(
-            `MDBList returned HTTP ${response.status}: ${text}`
-        );
-    }
-
-    return JSON.parse(text);
-}
-
-
-/*
- * Get the array from the MDBList response.
- */
-function getItems(data) {
-
-    if (Array.isArray(data)) {
-        return data;
-    }
-
-    if (Array.isArray(data.items)) {
-        return data.items;
-    }
-
-    if (Array.isArray(data.results)) {
-        return data.results;
-    }
-
-    return [];
-}
-
-
-/*
- * Find the IMDb ID for an episode.
- */
-function getImdbId(item) {
-
-    return (
-        item.imdb_id ||
-        item.imdbid ||
-        item.ids?.imdb ||
-        item.episode?.ids?.imdb ||
-        item.ids?.imdb_id ||
-        item.episode?.imdb_id
-    );
-}
-
-
-/*
- * Find the show IMDb ID.
+ * IMPORTANT:
+ * Do NOT use mediatype=episode here.
  *
- * Stremio's episode IDs are normally the IMDb ID
- * of the episode itself, which lets Stremio resolve
- * the episode correctly.
+ * The current MDBList history response contains:
+ *
+ * {
+ *   movies: [...],
+ *   shows: [...],
+ *   seasons: [...],
+ *   episodes: [...]
+ * }
+ *
+ * The episode records contain:
+ *
+ * episode
+ * episode.show
+ * episode.season
+ * episode.number
+ * watched_at
+ *
+ * This is the structure used by current
+ * MDBList history integrations.
  */
-function getEpisodeId(item) {
+async function getHistory(apiKey) {
 
-    return getImdbId(item);
-}
+    const allEpisodes = [];
 
+    let offset = 0;
 
-/*
- * Get season number.
- */
-function getSeason(item) {
+    const limit = 1000;
 
-    return (
-        item.season ||
-        item.season_number ||
-        item.episode?.season ||
-        item.episode?.season_number
-    );
-}
+    const maxPages = 100;
 
+    for (let page = 0; page < maxPages; page++) {
 
-/*
- * Get episode number.
- */
-function getEpisode(item) {
+        const params = new URLSearchParams({
+            apikey: apiKey,
+            offset: String(offset),
+            limit: String(limit)
+        });
 
-    return (
-        item.episode ||
-        item.episode_number ||
-        item.number ||
-        item.episode?.number ||
-        item.episode?.episode_number
-    );
-}
+        const url =
+            `https://api.mdblist.com/sync/watched?${params}`;
 
-
-/*
- * Get show title.
- */
-function getShowTitle(item) {
-
-    return (
-        item.show?.title ||
-        item.show?.name ||
-        item.series?.title ||
-        item.series?.name ||
-        item.parent?.title ||
-        item.parent?.name ||
-        item.title ||
-        item.name ||
-        "Unknown Show"
-    );
-}
-
-
-/*
- * Get poster.
- */
-function getPoster(item) {
-
-    return (
-        item.poster ||
-        item.images?.poster ||
-        item.show?.poster ||
-        item.show?.images?.poster ||
-        item.series?.poster ||
-        item.series?.images?.poster
-    );
-}
-
-
-/*
- * Get the watched timestamp if MDBList returns one.
- */
-function getWatchedTime(item) {
-
-    return (
-        item.watched_at ||
-        item.watchedAt ||
-        item.last_watched_at ||
-        item.lastWatchedAt ||
-        item.episode?.watched_at ||
-        item.episode?.last_watched_at ||
-        0
-    );
-}
-
-
-/*
- * Convert an MDBList episode into a Stremio
- * catalog item.
- */
-function convertEpisode(item) {
-
-    const episodeId =
-        getEpisodeId(item);
-
-    const season =
-        getSeason(item);
-
-    const episode =
-        getEpisode(item);
-
-    if (!episodeId) {
         console.log(
-            "Skipping episode without IMDb ID:",
-            item
+            `MDBList history request: offset=${offset}`
         );
 
-        return null;
-    }
+        const response =
+            await fetch(url);
 
-    if (
-        season === undefined ||
-        episode === undefined
-    ) {
+        const text =
+            await response.text();
+
         console.log(
-            "Skipping episode without season/episode:",
-            item
+            `MDBList HTTP status: ${response.status}`
         );
 
-        return null;
-    }
+        if (!response.ok) {
 
-    const title =
-        getShowTitle(item);
+            throw new Error(
+                `MDBList returned HTTP ${response.status}: ${text}`
+            );
+        }
 
-    const result = {
-        id: episodeId,
+        let data;
+
+        try {
+            data = JSON.parse(text);
+        } catch (error) {
+
+            throw new Error(
+                "MDBList returned invalid JSON."
+            );
+        }
 
         /*
-         * We deliberately return "series".
-         * Stremio can resolve the episode ID and
-         * display the corresponding episode.
+         * THIS is the important part.
+         *
+         * History episodes are in data.episodes.
          */
+        const episodes =
+            Array.isArray(data.episodes)
+                ? data.episodes
+                : [];
+
+        console.log(
+            `Episodes returned: ${episodes.length}`
+        );
+
+        allEpisodes.push(
+            ...episodes
+        );
+
+        /*
+         * MDBList's current pagination information.
+         */
+        const pagination =
+            data.pagination;
+
+        if (
+            pagination &&
+            pagination.has_more === false
+        ) {
+            break;
+        }
+
+        /*
+         * Also stop if this page contains nothing.
+         */
+        if (episodes.length === 0) {
+            break;
+        }
+
+        /*
+         * If fewer than the requested number came back,
+         * there is normally nothing more to fetch.
+         */
+        const totalRows =
+            (
+                Array.isArray(data.movies)
+                    ? data.movies.length
+                    : 0
+            ) +
+            (
+                Array.isArray(data.shows)
+                    ? data.shows.length
+                    : 0
+            ) +
+            (
+                Array.isArray(data.seasons)
+                    ? data.seasons.length
+                    : 0
+            ) +
+            episodes.length;
+
+        if (totalRows < limit) {
+            break;
+        }
+
+        offset += limit;
+    }
+
+    return allEpisodes;
+}
+
+
+/*
+ * Get an IMDb ID from an MDBList IDs object.
+ */
+function getImdbId(ids) {
+
+    if (!ids || typeof ids !== "object") {
+        return null;
+    }
+
+    const value =
+        ids.imdb ||
+        ids.imdb_id;
+
+    if (!value) {
+        return null;
+    }
+
+    const id =
+        String(value).trim();
+
+    if (!/^tt\d+$/.test(id)) {
+        return null;
+    }
+
+    return id;
+}
+
+
+/*
+ * Convert an MDBList episode record into
+ * a Stremio catalog entry.
+ */
+function convertEpisode(row) {
+
+    if (!row || typeof row !== "object") {
+        return null;
+    }
+
+    const episode =
+        row.episode || {};
+
+    const show =
+        episode.show || {};
+
+    /*
+     * MDBList's current history structure puts
+     * the show IDs inside episode.show.ids.
+     */
+    const showId =
+        getImdbId(show.ids) ||
+        getImdbId(episode.ids) ||
+        getImdbId(row.ids);
+
+    if (!showId) {
+
+        console.log(
+            "Skipping history entry without IMDb ID."
+        );
+
+        return null;
+    }
+
+    /*
+     * Season and episode numbers.
+     */
+    const season =
+        Number(
+            episode.season
+        );
+
+    const episodeNumber =
+        Number(
+            episode.number ??
+            episode.episode
+        );
+
+    if (
+        !Number.isInteger(season) ||
+        !Number.isInteger(episodeNumber) ||
+        season < 0 ||
+        episodeNumber < 0
+    ) {
+
+        console.log(
+            "Skipping history entry without episode numbers."
+        );
+
+        return null;
+    }
+
+    /*
+     * Show title.
+     */
+    const showTitle =
+        String(
+            show.title ||
+            show.name ||
+            row.series_title ||
+            row.show_title ||
+            "Unknown Show"
+        ).trim();
+
+    /*
+     * Episode title.
+     */
+    const episodeTitle =
+        String(
+            episode.title ||
+            episode.name ||
+            ""
+        ).trim();
+
+    /*
+     * The actual watch timestamp.
+     */
+    const watchedAt =
+        row.watched_at ||
+        row.last_watched_at ||
+        null;
+
+    /*
+     * Format exactly like:
+     *
+     * The Bear
+     * S04E03
+     */
+    const episodeCode =
+        `S${String(season).padStart(2, "0")}` +
+        `E${String(episodeNumber).padStart(2, "0")}`;
+
+    /*
+     * Stremio catalog entries are series previews.
+     *
+     * We use the show's IMDb ID so clicking the
+     * entry opens the actual show.
+     *
+     * The episode information is displayed in
+     * releaseInfo/description.
+     */
+    const meta = {
+
+        id: showId,
+
         type: "series",
 
-        name: title,
+        name: showTitle,
 
-        poster: getPoster(item),
+        releaseInfo: episodeCode,
+
+        description:
+            episodeTitle
+                ? `${episodeCode} — ${episodeTitle}`
+                : episodeCode,
+
+        poster:
+            show.poster ||
+            show.images?.poster ||
+            episode.poster ||
+            episode.images?.poster,
 
         posterShape: "poster",
 
-        /*
-         * This tells Stremio which episode this
-         * catalog entry represents.
-         */
-        season: Number(season),
-        episode: Number(episode),
-
-        /*
-         * Make the catalog entry explicitly show
-         * the episode number.
-         */
-        description:
-            `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`
+        behaviorHints: {
+            defaultVideoId:
+                getImdbId(episode.ids)
+        }
     };
 
-    return result;
+    return {
+        meta,
+        watchedAt
+    };
 }
 
 
 /*
  * Recently Watched catalog.
  */
-builder.defineCatalogHandler(async (args) => {
-
-    console.log(
-        "Catalog request:",
-        JSON.stringify({
-            id: args.id,
-            type: args.type,
-            configured: !!args.config?.apiKey
-        })
-    );
-
-    if (
-        args.id !==
-        "mdblist-recently-watched"
-    ) {
-        return {
-            metas: []
-        };
-    }
-
-    const apiKey =
-        args.config?.apiKey;
-
-    if (!apiKey) {
+builder.defineCatalogHandler(
+    async (args) => {
 
         console.log(
-            "No MDBList API key supplied."
-        );
-
-        return {
-            metas: []
-        };
-    }
-
-    try {
-
-        const data =
-            await getWatchedEpisodes(
-                apiKey
-            );
-
-        const items =
-            getItems(data);
-
-        console.log(
-            "MDBList returned",
-            items.length,
-            "watched episodes"
+            "Catalog request:",
+            {
+                id: args.id,
+                type: args.type,
+                configured:
+                    Boolean(
+                        args.config?.apiKey
+                    )
+            }
         );
 
         /*
-         * Convert episodes.
+         * Only handle our catalog.
          */
-        const entries =
-            items
-                .map(item => ({
-                    item,
-                    meta: convertEpisode(item),
-                    watchedTime: getWatchedTime(item)
-                }))
-                .filter(entry =>
-                    entry.meta !== null
-                );
-
-        /*
-         * Newest watched episode first,
-         * when MDBList supplies a timestamp.
-         */
-        entries.sort((a, b) => {
-
-            const aTime =
-                Date.parse(
-                    a.watchedTime
-                ) || 0;
-
-            const bTime =
-                Date.parse(
-                    b.watchedTime
-                ) || 0;
-
-            return bTime - aTime;
-        });
-
-        /*
-         * Remove duplicate episode IDs while
-         * preserving the newest occurrence.
-         */
-        const seen = new Set();
-
-        const metas = [];
-
-        for (const entry of entries) {
-
-            if (
-                seen.has(
-                    entry.meta.id
-                )
-            ) {
-                continue;
-            }
-
-            seen.add(
-                entry.meta.id
-            );
-
-            metas.push(
-                entry.meta
-            );
-
-            if (metas.length >= 100) {
-                break;
-            }
+        if (
+            args.id !==
+            "mdblist-recently-watched"
+        ) {
+            return {
+                metas: []
+            };
         }
 
-        console.log(
-            "Returning",
-            metas.length,
-            "recently watched episodes"
-        );
+        /*
+         * Get the API key from the Stremio
+         * configuration.
+         */
+        const apiKey =
+            args.config?.apiKey;
 
-        return {
-            metas,
-            cacheMaxAge: 60
-        };
+        if (!apiKey) {
 
-    } catch (error) {
+            console.log(
+                "No MDBList API key."
+            );
 
-        console.error(
-            "MDBList Recently Watched error:",
-            error
-        );
+            return {
+                metas: []
+            };
+        }
 
-        return {
-            metas: []
-        };
+        try {
+
+            /*
+             * Get the actual MDBList history.
+             */
+            const episodes =
+                await getHistory(
+                    apiKey
+                );
+
+            console.log(
+                `Total MDBList history episodes: ${episodes.length}`
+            );
+
+            /*
+             * Convert each episode.
+             */
+            const converted =
+                episodes
+                    .map(convertEpisode)
+                    .filter(Boolean);
+
+            /*
+             * Sort by the ACTUAL MDBList watch
+             * timestamp, newest first.
+             */
+            converted.sort(
+                (a, b) => {
+
+                    const aTime =
+                        Date.parse(
+                            a.watchedAt || ""
+                        ) || 0;
+
+                    const bTime =
+                        Date.parse(
+                            b.watchedAt || ""
+                        ) || 0;
+
+                    return bTime - aTime;
+                }
+            );
+
+            /*
+             * Keep every individual history event.
+             *
+             * Do NOT deduplicate episodes.
+             *
+             * If you watched:
+             *
+             * The Bear S04E03
+             * The Bear S04E02
+             * The Bear S04E03
+             *
+             * all three history events remain.
+             */
+            const metas =
+                converted
+                    .slice(0, 100)
+                    .map(
+                        entry => entry.meta
+                    );
+
+            console.log(
+                `Returning ${metas.length} catalog items.`
+            );
+
+            return {
+                metas,
+
+                /*
+                 * Short cache so newly watched episodes
+                 * appear quickly.
+                 */
+                cacheMaxAge: 60
+            };
+
+        } catch (error) {
+
+            console.error(
+                "MDBList history error:",
+                error
+            );
+
+            return {
+                metas: []
+            };
+        }
     }
-});
+);
 
 
 /*
- * Start addon server.
+ * Start the addon.
  */
 serveHTTP(
     builder.getInterface(),
@@ -432,3 +518,4 @@ serveHTTP(
             process.env.PORT || 7000
     }
 );
+```
