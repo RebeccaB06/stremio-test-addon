@@ -190,25 +190,38 @@ function convertItem(item, type) {
 
     return meta;
 }
-
 builder.defineMetaHandler(async (args) => {
-    // Check if the request is for an episode ID (e.g. tt1234567:1:5)
     const parts = args.id.split(":");
+    
+    // Check if the request is an episode ID (e.g., tt1234567:1:5)
     if (parts.length === 3) {
-        const [imdbId, season, episode] = parts;
+        const [imdbId, seasonStr, episodeStr] = parts;
+        const season = parseInt(seasonStr, 10);
+        const episode = parseInt(episodeStr, 10);
+
         return {
             meta: {
-                id: args.id,
+                id: imdbId, // MUST be parent show IMDb ID so the back button points to the show
                 type: "series",
-                name: `Episode S${season}E${episode}`,
-                // Points Stremio to the parent series so it knows where to draw show info from
-                videos: []
+                name: "Show Title Here", // Replace with show title (or fetch from Cinemeta/TMDB)
+                poster: "https://...",   // Parent show poster
+                background: "https://...",
+                description: "Show overview description...",
+                videos: [
+                    {
+                        id: `${imdbId}:${season}:${episode}`,
+                        title: `Episode Title Here`, // Or `S${season}E${episode}`
+                        season: season,
+                        number: episode,
+                        released: new Date().toISOString()
+                    }
+                ]
             }
         };
     }
+
     return { meta: null };
 });
-
 builder.defineCatalogHandler(async (args) => {
 
     console.log(
