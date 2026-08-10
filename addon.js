@@ -11,7 +11,7 @@ const manifest = {
 
     resources: ["catalog"],
 
-    types: ["movie"],
+    types: ["series"],
 
     catalogs: [
         {
