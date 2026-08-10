@@ -1,3 +1,4 @@
+const path = require("path");
 const {
     addonBuilder,
     serveHTTP
@@ -7,7 +8,7 @@ const manifest = {
     id: "com.example.mdblist-history",
     version: "1.0.0",
     name: "MDBList History",
-    description: "Shows your recently watched MDBList movies and series in Stremio.",
+    description: "Shows recently watched movies and series from MDBList.",
 
     resources: ["catalog"],
 
@@ -15,13 +16,13 @@ const manifest = {
 
     catalogs: [
         {
-            id: "mdblist-history",
             type: "movie",
+            id: "mdblist-history",
             name: "MDBList History"
         },
         {
-            id: "mdblist-history",
             type: "series",
+            id: "mdblist-history",
             name: "MDBList History"
         }
     ],
@@ -38,32 +39,35 @@ const builder = new addonBuilder(manifest);
 
 
 /*
- * MDBList API
+ * Get watched items from MDBList.
  */
 async function getWatched(apiKey, mediaType) {
-    const url =
-        "https://api.mdblist.com/sync/watched" +
-        "?apikey=" + encodeURIComponent(apiKey) +
-        "&mediatype=" + encodeURIComponent(mediaType) +
-        "&limit=1000" +
-        "&append_to_response=poster";
+    const params = new URLSearchParams({
+        apikey: apiKey,
+        mediatype: mediaType,
+        limit: "1000"
+    });
 
-    const response = await fetch(url);
+    const response = await fetch(
+        `https://api.mdblist.com/sync/watched?${params}`
+    );
 
     if (!response.ok) {
+        const text = await response.text();
+
         throw new Error(
-            `MDBList API returned ${response.status}`
+            `MDBList API error ${response.status}: ${text}`
         );
     }
 
-    return await response.json();
+    return response.json();
 }
 
 
 /*
- * Convert one MDBList item into a Stremio catalog item.
+ * Convert an MDBList item into a Stremio MetaPreview.
  */
-function convertItem(item, type) {
+function toStremioMeta(item, type) {
     const imdbId =
         item.imdb_id ||
         item.imdbid ||
@@ -73,20 +77,20 @@ function convertItem(item, type) {
         return null;
     }
 
+    const name =
+        item.title ||
+        item.name ||
+        "Unknown";
+
     const meta = {
         id: imdbId,
-        type: type,
-        name:
-            item.title ||
-            item.name ||
-            "Unknown",
-
-        poster:
-            item.poster ||
-            item.images?.poster,
-
-        posterShape: "poster"
+        type,
+        name
     };
+
+    if (item.poster) {
+        meta.poster = item.poster;
+    }
 
     if (item.year) {
         meta.releaseInfo = String(item.year);
@@ -97,72 +101,67 @@ function convertItem(item, type) {
 
 
 /*
- * Catalog handler
+ * MDBList watched catalog.
  */
 builder.defineCatalogHandler(async (args) => {
-
-    if (
-        args.id !== "mdblist-history"
-    ) {
-        return {
-            metas: []
-        };
-    }
-
- const apiKey =
-    args.config?.apiKey ||
-    args.extra?.apiKey;
+    const apiKey =
+        args.config?.apiKey;
 
     if (!apiKey) {
+        console.log("No MDBList API key supplied.");
+
         return {
             metas: []
         };
     }
 
+    const mediaType =
+        args.type === "series"
+            ? "show"
+            : "movie";
+
     try {
-
-        const mediaType =
-            args.type === "series"
-                ? "show"
-                : "movie";
-
-        const data = await getWatched(
-            apiKey,
-            mediaType
+        console.log(
+            `Loading MDBList watched ${mediaType} items...`
         );
 
-        /*
-         * MDBList returns the watched items.
-         *
-         * We reverse the list so the most recently
-         * watched items appear first when the API
-         * returns them oldest-first.
-         */
-        let items =
-            data.items ||
-            data.results ||
-            [];
+        const data =
+            await getWatched(
+                apiKey,
+                mediaType
+            );
 
-        items = [...items].reverse();
+        const items =
+            Array.isArray(data)
+                ? data
+                : (
+                    data.items ||
+                    data.results ||
+                    []
+                );
 
         const metas = items
             .map(item =>
-                convertItem(
+                toStremioMeta(
                     item,
                     args.type
                 )
             )
-            .filter(Boolean);
+            .filter(Boolean)
+            .slice(0, 100);
+
+        console.log(
+            `Returning ${metas.length} items.`
+        );
 
         return {
-            metas: metas.slice(0, 100),
+            metas,
             cacheMaxAge: 60
         };
 
     } catch (error) {
-
         console.error(
-            "MDBList error:",
+            "MDBList request failed:",
             error
         );
 
@@ -173,10 +172,18 @@ builder.defineCatalogHandler(async (args) => {
 });
 
 
+/*
+ * Start the addon server.
+ */
 serveHTTP(
     builder.getInterface(),
     {
         port: process.env.PORT || 7000,
-        static: "./public"
+
+        // Serves files from ./public
+        static: path.join(
+            __dirname,
+            "public"
+        )
     }
 );
