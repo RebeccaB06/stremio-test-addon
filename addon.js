@@ -9,27 +9,34 @@ const manifest = {
     name: "MDBList History",
     description: "Shows your recently watched items from MDBList.",
 
-    resources: ["catalog"],
+    resources: [
+        "catalog",
+        {
+            name: "meta",
+            types: ["series"],
+            idPrefixes: ["mdblist:"]
+        }
+    ],
 
     types: ["series"],
 
-catalogs: [
-    {
-        id: "mdblist-history",
-        type: "series",
-        name: "History"
-    },
-    {
-        id: "mdblist-last-episode",
-        type: "series",
-        name: "Last Episode of Show Watched"
-    },
-    {
-        id: "mdblist-next-episodes",
-        type: "series",
-        name: "Next Episodes"
-    }
-],
+    catalogs: [
+        {
+            id: "mdblist-history",
+            type: "series",
+            name: "History"
+        },
+        {
+            id: "mdblist-last-episode",
+            type: "series",
+            name: "Last Episode of Show Watched"
+        },
+        {
+            id: "mdblist-next-episodes",
+            type: "series",
+            name: "Next Episodes"
+        }
+    ],
 
     config: [
         {
@@ -39,11 +46,11 @@ catalogs: [
             required: true
         },
         {
-    key: "username",
-    type: "text",
-    title: "MDBList Username",
-    required: true
-},
+            key: "username",
+            type: "text",
+            title: "MDBList Username",
+            required: true
+        }
     ],
 
     behaviorHints: {
