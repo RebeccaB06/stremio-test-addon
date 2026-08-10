@@ -197,10 +197,10 @@ function convertItem(item, type) {
     return meta;
 }
 
-builder.defineMetaHandler(async (args) => {
+builder.defineStreamHandler(async (args) => {
 
     console.log(
-        "META REQUEST:",
+        "STREAM REQUEST:",
         JSON.stringify({
             type: args.type,
             id: args.id
@@ -209,680 +209,111 @@ builder.defineMetaHandler(async (args) => {
 
 
     /*
-     * The catalog gives us:
+     * We only handle IMDb series episode IDs.
      *
-     * mdblist:%2Fshow%2F...%2Fseason%2F1%2Fepisode%2F2
+     * Example:
      *
-     * We resolve that only when the user opens it.
+     * tt0452716:1:1
      */
     if (
         args.type !== "series" ||
         !args.id ||
-        !args.id.startsWith("mdblist:")
+        !/^tt[0-9]+:[0-9]+:[0-9]+$/.test(args.id)
     ) {
+
         return {
-            meta: null
+            streams: []
         };
     }
 
 
-    let episodePath;
-
-
-    try {
-
-        episodePath =
-            decodeURIComponent(
-                args.id.substring(
-                    "mdblist:".length
-                )
-            );
-
-    } catch (error) {
-
-        console.error(
-            "Failed to decode MDBList ID:",
-            error
-        );
-
-        return {
-            meta: null
-        };
-    }
-
-
-    /*
-     * Make sure this really is an episode path.
-     *
-     * Example:
-     *
-     * /show/8pw7-angel/season/3/episode/10
-     */
-    const pathMatch =
-        episodePath.match(
-            /^\/show\/([^/]+)\/season\/([0-9]+)\/episode\/([0-9]+)$/i
-        );
-
-
-    if (!pathMatch) {
-
-        console.error(
-            "Invalid MDBList episode path:",
-            episodePath
-        );
-
-        return {
-            meta: null
-        };
-    }
-
-
-    const season =
-        Number(
-            pathMatch[2]
-        );
-
-
-    const episode =
-        Number(
-            pathMatch[3]
-        );
-
-
-    /*
-     * --------------------------------------------------
-     * FETCH ONLY THIS ONE EPISODE PAGE.
-     * --------------------------------------------------
-     */
-
-    const url =
-        "https://mdblist.com" +
-        episodePath;
+    const streamId =
+        args.id;
 
 
     console.log(
-        "Fetching clicked MDBList episode:",
-        url
+        "Looking up streams for:",
+        streamId
     );
 
 
     try {
 
+        /*
+         * ==================================================
+         * PUT YOUR STREAM-SOURCE REQUEST HERE.
+         *
+         * The important thing is that the requested ID is
+         * passed through EXACTLY as:
+         *
+         * tt0452716:1:1
+         *
+         * ==================================================
+         */
+
+        const url =
+            "YOUR_STREAMS_REPO_URL/" +
+            encodeURIComponent(streamId);
+
+
+        console.log(
+            "Fetching streams:",
+            url
+        );
+
+
         const response =
             await fetch(url);
 
 
-        const html =
+        const text =
             await response.text();
 
 
         console.log(
-            "MDBList episode HTTP status:",
+            "Streams HTTP status:",
             response.status
-        );
-
-
-        console.log(
-            "MDBList episode HTML length:",
-            html.length
         );
 
 
         if (!response.ok) {
 
             throw new Error(
-                "MDBList returned HTTP " +
-                response.status
+                "Streams source returned HTTP " +
+                response.status +
+                ": " +
+                text
             );
         }
 
 
-        /*
-         * --------------------------------------------------
-         * FIND IMDb IDs.
-         *
-         * We do NOT simply use the first IMDb ID.
-         *
-         * The page can contain both the show's IMDb ID
-         * and the episode's IMDb ID.
-         * --------------------------------------------------
-         */
+        const data =
+            JSON.parse(text);
 
 
         /*
-         * First look for an IMDb ID in structured data.
-         *
-         * JSON-LD commonly contains:
-         *
-         * TVSeries
-         * TVEpisode
-         *
-         * with their IMDb URLs.
+         * Return the streams exactly as Stremio expects.
          */
-
-        let seriesImdbId =
-            null;
-
-
-        let episodeImdbId =
-            null;
-
-
-        /*
-         * Find JSON-LD blocks.
-         */
-        const jsonLdRegex =
-            /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
-
-
-        let jsonLdMatch;
-
-
-        while (
-            (jsonLdMatch =
-                jsonLdRegex.exec(html)) !== null
-        ) {
-
-            const rawJson =
-                jsonLdMatch[1].trim();
-
-
-            try {
-
-                const data =
-                    JSON.parse(rawJson);
-
-
-                const objects =
-                    Array.isArray(data)
-                        ? data
-                        : data["@graph"]
-                            ? data["@graph"]
-                            : [data];
-
-
-                for (
-                    let i = 0;
-                    i < objects.length;
-                    i++
-                ) {
-
-                    const obj =
-                        objects[i];
-
-
-                    if (
-                        !obj ||
-                        typeof obj !== "object"
-                    ) {
-                        continue;
-                    }
-
-
-                    const type =
-                        obj["@type"];
-
-
-                    let imdbUrl =
-                        null;
-
-
-                    if (
-                        typeof obj.url === "string"
-                    ) {
-
-                        imdbUrl =
-                            obj.url;
-                    }
-
-
-                    if (
-                        typeof obj["@id"] === "string"
-                    ) {
-
-                        if (
-                            obj["@id"].includes(
-                                "imdb.com/title/"
-                            )
-                        ) {
-
-                            imdbUrl =
-                                obj["@id"];
-                        }
-                    }
-
-
-                    if (
-                        typeof imdbUrl !== "string"
-                    ) {
-                        continue;
-                    }
-
-
-                    const imdbMatch =
-                        imdbUrl.match(
-                            /imdb\.com\/title\/(tt[0-9]+)/i
-                        );
-
-
-                    if (!imdbMatch) {
-                        continue;
-                    }
-
-
-                    const imdbId =
-                        imdbMatch[1];
-
-
-                    /*
-                     * TVSeries = the ID we need.
-                     */
-                    if (
-                        type === "TVSeries" ||
-                        type === "Series"
-                    ) {
-
-                        seriesImdbId =
-                            imdbId;
-                    }
-
-
-                    /*
-                     * TVEpisode = useful fallback.
-                     */
-                    if (
-                        type === "TVEpisode"
-                    ) {
-
-                        episodeImdbId =
-                            imdbId;
-                    }
-                }
-
-            } catch (error) {
-
-                /*
-                 * Some pages can contain JSON-LD that
-                 * isn't valid JSON. Ignore that block.
-                 */
-            }
-        }
-
-
-        /*
-         * --------------------------------------------------
-         * If JSON-LD didn't give us the series ID,
-         * inspect IMDb links in the HTML.
-         * --------------------------------------------------
-         */
-
-        if (!seriesImdbId) {
-
-            /*
-             * Find all IMDb title links.
-             */
-            const imdbMatches =
-                [
-                    ...html.matchAll(
-                        /https?:\/\/(?:www\.)?imdb\.com\/title\/(tt[0-9]+)/gi
-                    )
-                ];
-
-
-            const imdbIds =
-                [
-                    ...new Set(
-                        imdbMatches.map(
-                            function(match) {
-                                return match[1];
-                            }
-                        )
-                    )
-                ];
-
-
-            console.log(
-                "IMDb IDs found on page:",
-                imdbIds
-            );
-
-
-            /*
-             * Try to identify the SERIES link by
-             * looking around each IMDb link for
-             * series/show context.
-             */
-            for (
-                let i = 0;
-                i < imdbIds.length;
-                i++
-            ) {
-
-                const candidate =
-                    imdbIds[i];
-
-
-                const escaped =
-                    candidate.replace(
-                        /[.*+?^${}()|[\]\\]/g,
-                        "\\$&"
-                    );
-
-
-                const candidateRegex =
-                    new RegExp(
-                        "[\\s\\S]{0,1000}" +
-                        "imdb\\.com\\/title\\/" +
-                        escaped +
-                        "[\\s\\S]{0,1000}",
-                        "i"
-                    );
-
-
-                const context =
-                    html.match(
-                        candidateRegex
-                    );
-
-
-                if (!context) {
-                    continue;
-                }
-
-
-                const contextText =
-                    context[0];
-
-
-                /*
-                 * Look for show/series indicators.
-                 */
-                if (
-                    /series|tvseries|show|parent|series_id|show_id/i
-                        .test(
-                            contextText
-                        )
-                ) {
-
-                    seriesImdbId =
-                        candidate;
-
-                    break;
-                }
-            }
-
-
-            /*
-             * If there is only one IMDb ID on the page,
-             * it is the best available candidate.
-             */
-            if (
-                !seriesImdbId &&
-                imdbIds.length === 1
-            ) {
-
-                seriesImdbId =
-                    imdbIds[0];
-            }
-        }
-
-
-        /*
-         * We MUST have the series IMDb ID.
-         *
-         * Do not manufacture one.
-         */
-        if (!seriesImdbId) {
-
-            console.error(
-                "Could not find the IMDb SERIES ID."
-            );
-
-            return {
-                meta: null
-            };
-        }
-
-
-        console.log(
-            "IMDb SERIES ID:",
-            seriesImdbId
-        );
-
-
-        /*
-         * --------------------------------------------------
-         * Extract the show name.
-         * --------------------------------------------------
-         */
-
-        let showName =
-            "";
-
-
-        /*
-         * Look for the page's main heading/title.
-         */
-        const headingMatches =
-            [
-                ...html.matchAll(
-                    /<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/gi
-                )
-            ];
-
-
-        for (
-            let i = 0;
-            i < headingMatches.length;
-            i++
-        ) {
-
-            const text =
-                headingMatches[i][1]
-                    .replace(
-                        /<[^>]+>/g,
-                        ""
-                    )
-                    .replace(
-                        /&amp;/g,
-                        "&"
-                    )
-                    .replace(
-                        /&quot;/g,
-                        '"'
-                    )
-                    .replace(
-                        /&#39;/g,
-                        "'"
-                    )
-                    .replace(
-                        /\s+/g,
-                        " "
-                    )
-                    .trim();
-
-
-            /*
-             * Avoid using generic page headings.
-             */
-            if (
-                text &&
-                !/recently watched|history|mdblist/i
-                    .test(text)
-            ) {
-
-                showName =
-                    text;
-
-                break;
-            }
-        }
-
-
-        /*
-         * Fallback: derive a readable name from
-         * the MDBList show slug.
-         */
-        if (!showName) {
-
-            showName =
-                pathMatch[1]
-                    .replace(
-                        /^[^-]+-/,
-                        ""
-                    )
-                    .replace(
-                        /-/g,
-                        " "
-                    )
-                    .replace(
-                        /\b\w/g,
-                        function(letter) {
-                            return letter.toUpperCase();
-                        }
-                    );
-        }
-
-
-        /*
-         * --------------------------------------------------
-         * Find the episode title.
-         * --------------------------------------------------
-         */
-
-        let episodeTitle =
-            "";
-
-
-        /*
-         * Look for the same activity-card structure
-         * we already know MDBList uses.
-         */
-        const subMatch =
-            html.match(
-                /<div class="activity-poster-card__sub">\s*([\s\S]*?)\s*<\/div>/i
-            );
-
-
-        if (subMatch) {
-
-            episodeTitle =
-                subMatch[1]
-                    .replace(
-                        /<[^>]+>/g,
-                        ""
-                    )
-                    .replace(
-                        /&amp;/g,
-                        "&"
-                    )
-                    .replace(
-                        /&quot;/g,
-                        '"'
-                    )
-                    .replace(
-                        /&#39;/g,
-                        "'"
-                    )
-                    .replace(
-                        /\s+/g,
-                        " "
-                    )
-                    .trim();
-        }
-
-
-        /*
-         * --------------------------------------------------
-         * THIS IS THE IMPORTANT PART.
-         *
-         * Stremio expects:
-         *
-         * meta.id:
-         *     tt11198330
-         *
-         * video.id:
-         *     tt11198330:1:1
-         *
-         * Exactly the normal Cinemeta format.
-         * --------------------------------------------------
-         */
-
-        const videoId =
-            seriesImdbId +
-            ":" +
-            season +
-            ":" +
-            episode;
-
-
-        console.log(
-            "Returning canonical Stremio IDs:",
-            JSON.stringify({
-                metaId:
-                    seriesImdbId,
-
-                videoId:
-                    videoId
-            })
-        );
-
-
         return {
 
-            meta: {
+            streams:
+                Array.isArray(data.streams)
+                    ? data.streams
+                    : []
 
-                /*
-                 * NORMAL IMDb SERIES ID.
-                 */
-                id:
-                    seriesImdbId,
-
-                type:
-                    "series",
-
-                name:
-                    showName,
-
-                videos: [
-
-                    {
-                        /*
-                         * NORMAL Stremio episode ID.
-                         *
-                         * Example:
-                         * tt11198330:1:1
-                         */
-                        id:
-                            videoId,
-
-                        title:
-                            episodeTitle ||
-                            (
-                                "Episode " +
-                                episode
-                            ),
-
-                        season:
-                            season,
-
-                        episode:
-                            episode
-                    }
-                ]
-            }
         };
 
 
     } catch (error) {
 
         console.error(
-            "MDBList meta error:",
+            "Stream lookup error:",
             error
         );
 
+
         return {
-            meta: null
+            streams: []
         };
     }
 });
