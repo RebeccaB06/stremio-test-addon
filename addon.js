@@ -181,7 +181,6 @@ function convertItem(item, type) {
 }
 
 
-
 builder.defineCatalogHandler(async (args) => {
 
     console.log(
@@ -232,12 +231,20 @@ builder.defineCatalogHandler(async (args) => {
 
 
     console.log(
-        "Fetching:",
+        "Fetching history:",
         historyUrl
     );
 
 
     try {
+
+        /*
+         * --------------------------------------------------
+         * STEP 1
+         *
+         * Fetch MDBList history.
+         * --------------------------------------------------
+         */
 
         const response =
             await fetch(historyUrl);
@@ -269,26 +276,23 @@ builder.defineCatalogHandler(async (args) => {
 
 
         /*
+         * --------------------------------------------------
+         * STEP 2
+         *
+         * Extract the actual activity cards.
+         *
          * MDBList uses:
          *
          * <div class="activity-poster-card">
-         *
-         * Each card contains:
-         *
-         * /show/.../season/.../episode/...
-         *
-         * poster
-         * title
-         * episode number
-         * episode title
+         * --------------------------------------------------
          */
-
 
         const cardRegex =
             /<div class="activity-poster-card">([\s\S]*?)<\/div>\s*<\/div>/gi;
 
 
-        const cards = [];
+        const history =
+            [];
 
 
         let cardMatch;
@@ -304,7 +308,11 @@ builder.defineCatalogHandler(async (args) => {
 
 
             /*
-             * Episode URL
+             * Episode URL.
+             *
+             * Example:
+             *
+             * /show/8pw7-angel/season/3/episode/4
              */
             const urlMatch =
                 card.match(
@@ -322,7 +330,7 @@ builder.defineCatalogHandler(async (args) => {
 
 
             /*
-             * Poster
+             * Poster.
              */
             const posterMatch =
                 card.match(
@@ -333,11 +341,13 @@ builder.defineCatalogHandler(async (args) => {
             const poster =
                 posterMatch
                     ? posterMatch[1]
-                    : null;
+                    : "";
 
 
             /*
-             * Title from:
+             * Title.
+             *
+             * Example:
              *
              * Buffy the Vampire Slayer S06E13
              */
@@ -379,7 +389,9 @@ builder.defineCatalogHandler(async (args) => {
 
 
             /*
-             * Episode title:
+             * Episode title.
+             *
+             * Example:
              *
              * Dead Things
              */
@@ -421,7 +433,7 @@ builder.defineCatalogHandler(async (args) => {
 
 
             /*
-             * S06E13
+             * Find SxxExx.
              */
             const episodeMatch =
                 title.match(
@@ -446,15 +458,9 @@ builder.defineCatalogHandler(async (args) => {
                 );
 
 
-            const code =
-                "S" +
-                episodeMatch[1] +
-                "E" +
-                episodeMatch[2];
-
-
             /*
-             * Remove S06E13 from the show title.
+             * Remove SxxExx from title to get
+             * the actual show name.
              */
             const showName =
                 title
@@ -465,7 +471,7 @@ builder.defineCatalogHandler(async (args) => {
                     .trim();
 
 
-            cards.push({
+            history.push({
                 path:
                     episodePath,
 
@@ -482,7 +488,10 @@ builder.defineCatalogHandler(async (args) => {
                     episode,
 
                 code:
-                    code,
+                    "S" +
+                    episodeMatch[1] +
+                    "E" +
+                    episodeMatch[2],
 
                 poster:
                     poster
@@ -491,31 +500,116 @@ builder.defineCatalogHandler(async (args) => {
 
 
         console.log(
-            "MDBList episode cards found:",
-            cards.length
+            "Total history cards:",
+            history.length
         );
 
 
         /*
-         * Now resolve the actual IMDb episode IDs.
+         * --------------------------------------------------
+         * STEP 3
          *
-         * MDBList's episode page contains the IMDb
-         * episode ID.
+         * IMPORTANT:
+         *
+         * Apply the 100-item limit FIRST.
+         *
+         * We do NOT deduplicate the entire history.
+         * --------------------------------------------------
          */
 
+        const first100 =
+            history.slice(
+                0,
+                100
+            );
 
-        const metas = [];
+
+        console.log(
+            "History entries used:",
+            first100.length
+        );
+
+
+        /*
+         * --------------------------------------------------
+         * STEP 4
+         *
+         * From those first 100 entries only,
+         * keep the newest entry for each show.
+         *
+         * MDBList history is newest first, so the first
+         * occurrence of a show is its newest watched
+         * episode within those 100 entries.
+         * --------------------------------------------------
+         */
+
+        const latestByShow =
+            {};
 
 
         for (
             let i = 0;
-            i < cards.length &&
-            i < 100;
+            i < first100.length;
             i++
         ) {
 
             const item =
-                cards[i];
+                first100[i];
+
+
+            const showKey =
+                item.showName
+                    .toLowerCase()
+                    .trim();
+
+
+            if (
+                !latestByShow[showKey]
+            ) {
+
+                latestByShow[showKey] =
+                    item;
+            }
+        }
+
+
+        const latestEpisodes =
+            Object.keys(
+                latestByShow
+            ).map(
+                function(key) {
+                    return latestByShow[key];
+                }
+            );
+
+
+        console.log(
+            "Unique shows in first 100:",
+            latestEpisodes.length
+        );
+
+
+        /*
+         * --------------------------------------------------
+         * STEP 5
+         *
+         * Fetch only the MDBList episode pages for
+         * these newest-per-show entries.
+         * --------------------------------------------------
+         */
+
+        const metas =
+            [];
+
+
+        for (
+            let i = 0;
+            i < latestEpisodes.length;
+            i++
+        ) {
+
+            const item =
+                latestEpisodes[i];
 
 
             const episodeUrl =
@@ -542,11 +636,7 @@ builder.defineCatalogHandler(async (args) => {
 
 
                 /*
-                 * MDBList episode pages contain:
-                 *
-                 * tt1234567
-                 *
-                 * for the IMDb episode.
+                 * Find the real IMDb episode ID.
                  */
                 const imdbMatch =
                     episodeHtml.match(
@@ -561,7 +651,9 @@ builder.defineCatalogHandler(async (args) => {
 
 
                 console.log(
-                    "Episode IMDb ID:",
+                    item.showName,
+                    item.code,
+                    "IMDb:",
                     imdbId
                 );
 
@@ -569,7 +661,7 @@ builder.defineCatalogHandler(async (args) => {
                 if (!imdbId) {
 
                     console.log(
-                        "No IMDb ID found for:",
+                        "Skipping episode without IMDb ID:",
                         item.showName,
                         item.code
                     );
@@ -579,10 +671,8 @@ builder.defineCatalogHandler(async (args) => {
 
 
                 /*
-                 * Return the actual IMDb episode ID.
-                 *
-                 * This is no longer a fake
-                 * mdblist-history-123 ID.
+                 * Return the real IMDb episode ID
+                 * so Stremio can resolve the metadata.
                  */
                 metas.push({
 
@@ -612,8 +702,11 @@ builder.defineCatalogHandler(async (args) => {
             } catch (episodeError) {
 
                 console.error(
-                    "Episode lookup failed:",
-                    episodeUrl,
+                    "Episode request failed:",
+                    episodeUrl
+                );
+
+                console.error(
                     episodeError
                 );
             }
@@ -648,6 +741,9 @@ builder.defineCatalogHandler(async (args) => {
         };
     }
 });
+
+
+
 
 
 
