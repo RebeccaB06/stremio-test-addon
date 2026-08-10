@@ -17,7 +17,12 @@ catalogs: [
     {
         id: "mdblist-history",
         type: "series",
-        name: "MDBList History"
+        name: "History"
+    },
+    {
+        id: "mdblist-last-episode",
+        type: "series",
+        name: "Last Episode of Show Watched"
     },
     {
         id: "mdblist-next-episodes",
@@ -203,10 +208,11 @@ builder.defineCatalogHandler(async (args) => {
 
 
     /*
-     * Only handle our two catalogs.
+     * Only handle our three catalogs.
      */
     if (
         args.id !== "mdblist-history" &&
+        args.id !== "mdblist-last-episode" &&
         args.id !== "mdblist-next-episodes"
     ) {
         return {
@@ -249,11 +255,11 @@ builder.defineCatalogHandler(async (args) => {
     try {
 
         /*
-         * --------------------------------------------------
+         * ==================================================
          * STEP 1
          *
          * Fetch MDBList history.
-         * --------------------------------------------------
+         * ==================================================
          */
 
         const response =
@@ -286,192 +292,253 @@ builder.defineCatalogHandler(async (args) => {
 
 
         /*
-         * --------------------------------------------------
+         * ==================================================
          * STEP 2
          *
-         * Extract activity cards.
-         * --------------------------------------------------
+         * Extract each day-group separately.
+         *
+         * Example:
+         *
+         * <div class="day-group"
+         *      data-date="2026-08-08">
+         *
+         * This lets us attach the date to every
+         * episode inside that group.
+         * ==================================================
          */
 
-        const cardRegex =
-            /<div class="activity-poster-card">([\s\S]*?)<\/div>\s*<\/div>/gi;
+        const dayRegex =
+            /<div class="day-group"[^>]*data-date="([^"]+)"[^>]*>([\s\S]*?)<\/div>\s*(?=<div class="day-group"|$)/gi;
 
 
         const history =
             [];
 
 
-        let cardMatch;
+        let dayMatch;
 
 
         while (
-            (cardMatch =
-                cardRegex.exec(html)) !== null
+            (dayMatch =
+                dayRegex.exec(html)) !== null
         ) {
 
-            const card =
-                cardMatch[1];
+            const watchedDate =
+                dayMatch[1];
 
 
-            const urlMatch =
-                card.match(
-                    /href="(\/show\/[^"]+\/season\/[0-9]+\/episode\/[0-9]+)"/i
-                );
+            const dayHtml =
+                dayMatch[2];
 
 
-            if (!urlMatch) {
-                continue;
+            /*
+             * Find activity cards inside this date.
+             */
+            const cardRegex =
+                /<div class="activity-poster-card">([\s\S]*?)<\/div>\s*<\/div>/gi;
+
+
+            let cardMatch;
+
+
+            while (
+                (cardMatch =
+                    cardRegex.exec(dayHtml)) !== null
+            ) {
+
+                const card =
+                    cardMatch[1];
+
+
+                /*
+                 * Episode URL.
+                 */
+                const urlMatch =
+                    card.match(
+                        /href="(\/show\/[^"]+\/season\/[0-9]+\/episode\/[0-9]+)"/i
+                    );
+
+
+                if (!urlMatch) {
+                    continue;
+                }
+
+
+                const episodePath =
+                    urlMatch[1];
+
+
+                /*
+                 * Poster.
+                 */
+                const posterMatch =
+                    card.match(
+                        /<img[^>]+src="([^"]+)"/i
+                    );
+
+
+                const poster =
+                    posterMatch
+                        ? posterMatch[1]
+                        : "";
+
+
+                /*
+                 * Show title + episode code.
+                 *
+                 * Example:
+                 *
+                 * Buffy the Vampire Slayer S06E13
+                 */
+                const titleMatch =
+                    card.match(
+                        /<div class="activity-poster-card__title">\s*<a[^>]*>([\s\S]*?)<\/a>/i
+                    );
+
+
+                let title =
+                    titleMatch
+                        ? titleMatch[1]
+                        : "";
+
+
+                title =
+                    title
+                        .replace(
+                            /<[^>]+>/g,
+                            ""
+                        )
+                        .replace(
+                            /&amp;/g,
+                            "&"
+                        )
+                        .replace(
+                            /&quot;/g,
+                            '"'
+                        )
+                        .replace(
+                            /&#39;/g,
+                            "'"
+                        )
+                        .replace(
+                            /\s+/g,
+                            " "
+                        )
+                        .trim();
+
+
+                /*
+                 * Episode title.
+                 *
+                 * Example:
+                 *
+                 * Dead Things
+                 */
+                const episodeTitleMatch =
+                    card.match(
+                        /<div class="activity-poster-card__sub">\s*([\s\S]*?)\s*<\/div>/i
+                    );
+
+
+                let episodeTitle =
+                    episodeTitleMatch
+                        ? episodeTitleMatch[1]
+                        : "";
+
+
+                episodeTitle =
+                    episodeTitle
+                        .replace(
+                            /<[^>]+>/g,
+                            ""
+                        )
+                        .replace(
+                            /&amp;/g,
+                            "&"
+                        )
+                        .replace(
+                            /&quot;/g,
+                            '"'
+                        )
+                        .replace(
+                            /&#39;/g,
+                            "'"
+                        )
+                        .replace(
+                            /\s+/g,
+                            " "
+                        )
+                        .trim();
+
+
+                /*
+                 * Find SxxExx.
+                 */
+                const episodeMatch =
+                    title.match(
+                        /\bS([0-9]+)E([0-9]+)\b/i
+                    );
+
+
+                if (!episodeMatch) {
+                    continue;
+                }
+
+
+                const season =
+                    Number(
+                        episodeMatch[1]
+                    );
+
+
+                const episode =
+                    Number(
+                        episodeMatch[2]
+                    );
+
+
+                /*
+                 * Remove SxxExx from title.
+                 */
+                const showName =
+                    title
+                        .replace(
+                            /\s*S[0-9]+E[0-9]+\s*$/i,
+                            ""
+                        )
+                        .trim();
+
+
+                history.push({
+
+                    path:
+                        episodePath,
+
+                    showName:
+                        showName,
+
+                    episodeTitle:
+                        episodeTitle,
+
+                    season:
+                        season,
+
+                    episode:
+                        episode,
+
+                    code:
+                        "S" +
+                        episodeMatch[1] +
+                        "E" +
+                        episodeMatch[2],
+
+                    poster:
+                        poster,
+
+                    watchedDate:
+                        watchedDate
+                });
             }
-
-
-            const episodePath =
-                urlMatch[1];
-
-
-            const posterMatch =
-                card.match(
-                    /<img[^>]+src="([^"]+)"/i
-                );
-
-
-            const poster =
-                posterMatch
-                    ? posterMatch[1]
-                    : "";
-
-
-            const titleMatch =
-                card.match(
-                    /<div class="activity-poster-card__title">\s*<a[^>]*>([\s\S]*?)<\/a>/i
-                );
-
-
-            let title =
-                titleMatch
-                    ? titleMatch[1]
-                    : "";
-
-
-            title =
-                title
-                    .replace(
-                        /<[^>]+>/g,
-                        ""
-                    )
-                    .replace(
-                        /&amp;/g,
-                        "&"
-                    )
-                    .replace(
-                        /&quot;/g,
-                        '"'
-                    )
-                    .replace(
-                        /&#39;/g,
-                        "'"
-                    )
-                    .replace(
-                        /\s+/g,
-                        " "
-                    )
-                    .trim();
-
-
-            const episodeTitleMatch =
-                card.match(
-                    /<div class="activity-poster-card__sub">\s*([\s\S]*?)\s*<\/div>/i
-                );
-
-
-            let episodeTitle =
-                episodeTitleMatch
-                    ? episodeTitleMatch[1]
-                    : "";
-
-
-            episodeTitle =
-                episodeTitle
-                    .replace(
-                        /<[^>]+>/g,
-                        ""
-                    )
-                    .replace(
-                        /&amp;/g,
-                        "&"
-                    )
-                    .replace(
-                        /&quot;/g,
-                        '"'
-                    )
-                    .replace(
-                        /&#39;/g,
-                        "'"
-                    )
-                    .replace(
-                        /\s+/g,
-                        " "
-                    )
-                    .trim();
-
-
-            const episodeMatch =
-                title.match(
-                    /\bS([0-9]+)E([0-9]+)\b/i
-                );
-
-
-            if (!episodeMatch) {
-                continue;
-            }
-
-
-            const season =
-                Number(
-                    episodeMatch[1]
-                );
-
-
-            const episode =
-                Number(
-                    episodeMatch[2]
-                );
-
-
-            const showName =
-                title
-                    .replace(
-                        /\s*S[0-9]+E[0-9]+\s*$/i,
-                        ""
-                    )
-                    .trim();
-
-
-            history.push({
-
-                path:
-                    episodePath,
-
-                showName:
-                    showName,
-
-                episodeTitle:
-                    episodeTitle,
-
-                season:
-                    season,
-
-                episode:
-                    episode,
-
-                code:
-                    "S" +
-                    episodeMatch[1] +
-                    "E" +
-                    episodeMatch[2],
-
-                poster:
-                    poster
-            });
         }
 
 
@@ -482,11 +549,13 @@ builder.defineCatalogHandler(async (args) => {
 
 
         /*
-         * --------------------------------------------------
+         * ==================================================
          * STEP 3
          *
          * FIRST apply the 100-item limit.
-         * --------------------------------------------------
+         *
+         * This applies to ALL THREE catalogs.
+         * ==================================================
          */
 
         const first100 =
@@ -503,68 +572,13 @@ builder.defineCatalogHandler(async (args) => {
 
 
         /*
-         * --------------------------------------------------
-         * STEP 4
+         * ==================================================
+         * HISTORY CATALOG
          *
-         * Keep only the newest episode of each show
-         * within those first 100 entries.
-         * --------------------------------------------------
-         */
-
-        const latestByShow =
-            {};
-
-
-        for (
-            let i = 0;
-            i < first100.length;
-            i++
-        ) {
-
-            const item =
-                first100[i];
-
-
-            const showKey =
-                item.showName
-                    .toLowerCase()
-                    .trim();
-
-
-            if (
-                !latestByShow[showKey]
-            ) {
-
-                latestByShow[showKey] =
-                    item;
-            }
-        }
-
-
-        const latestEpisodes =
-            Object.keys(
-                latestByShow
-            ).map(
-                function(key) {
-                    return latestByShow[key];
-                }
-            );
-
-
-        console.log(
-            "Unique shows in first 100:",
-            latestEpisodes.length
-        );
-
-
-        /*
-         * --------------------------------------------------
-         * EXISTING CATALOG
+         * All first 100 entries.
          *
-         * MDBList History
-         *
-         * Shows the latest watched episode.
-         * --------------------------------------------------
+         * NO duplicate removal.
+         * ==================================================
          */
 
         if (
@@ -577,12 +591,12 @@ builder.defineCatalogHandler(async (args) => {
 
             for (
                 let i = 0;
-                i < latestEpisodes.length;
+                i < first100.length;
                 i++
             ) {
 
                 const item =
-                    latestEpisodes[i];
+                    first100[i];
 
 
                 const episodeUrl =
@@ -591,7 +605,7 @@ builder.defineCatalogHandler(async (args) => {
 
 
                 console.log(
-                    "Fetching watched episode:",
+                    "Fetching history episode:",
                     episodeUrl
                 );
 
@@ -646,14 +660,16 @@ builder.defineCatalogHandler(async (args) => {
                             item.code,
 
                         description:
-                            item.episodeTitle
+                            item.episodeTitle +
+                            " • Watched " +
+                            item.watchedDate
                     });
 
 
                 } catch (error) {
 
                     console.error(
-                        "Episode request failed:",
+                        "History episode request failed:",
                         episodeUrl
                     );
                 }
@@ -677,12 +693,180 @@ builder.defineCatalogHandler(async (args) => {
 
 
         /*
-         * --------------------------------------------------
-         * NEXT EPISODES CATALOG
+         * ==================================================
+         * STEP 4
          *
-         * Take each latest watched episode and find
-         * the episode immediately after it.
-         * --------------------------------------------------
+         * Create newest-per-show list.
+         *
+         * This is done ONLY from the first 100.
+         * ==================================================
+         */
+
+        const latestByShow =
+            {};
+
+
+        for (
+            let i = 0;
+            i < first100.length;
+            i++
+        ) {
+
+            const item =
+                first100[i];
+
+
+            const showKey =
+                item.showName
+                    .toLowerCase()
+                    .trim();
+
+
+            /*
+             * Because MDBList history is newest first,
+             * the first occurrence is the newest episode.
+             */
+            if (
+                !latestByShow[showKey]
+            ) {
+
+                latestByShow[showKey] =
+                    item;
+            }
+        }
+
+
+        const latestEpisodes =
+            Object.keys(
+                latestByShow
+            ).map(
+                function(key) {
+                    return latestByShow[key];
+                }
+            );
+
+
+        console.log(
+            "Unique shows in first 100:",
+            latestEpisodes.length
+        );
+
+
+        /*
+         * ==================================================
+         * LAST EPISODE OF SHOW WATCHED
+         * ==================================================
+         */
+
+        if (
+            args.id === "mdblist-last-episode"
+        ) {
+
+            const metas =
+                [];
+
+
+            for (
+                let i = 0;
+                i < latestEpisodes.length;
+                i++
+            ) {
+
+                const item =
+                    latestEpisodes[i];
+
+
+                const episodeUrl =
+                    "https://mdblist.com" +
+                    item.path;
+
+
+                try {
+
+                    const episodeResponse =
+                        await fetch(
+                            episodeUrl
+                        );
+
+
+                    const episodeHtml =
+                        await episodeResponse.text();
+
+
+                    const imdbMatch =
+                        episodeHtml.match(
+                            /\btt[0-9]{7,9}\b/
+                        );
+
+
+                    const imdbId =
+                        imdbMatch
+                            ? imdbMatch[0]
+                            : null;
+
+
+                    if (!imdbId) {
+                        continue;
+                    }
+
+
+                    metas.push({
+
+                        id:
+                            imdbId,
+
+                        type:
+                            "series",
+
+                        name:
+                            item.showName,
+
+                        poster:
+                            item.poster,
+
+                        posterShape:
+                            "poster",
+
+                        releaseInfo:
+                            item.code,
+
+                        description:
+                            item.episodeTitle +
+                            " • Watched " +
+                            item.watchedDate
+                    });
+
+
+                } catch (error) {
+
+                    console.error(
+                        "Last episode request failed:",
+                        episodeUrl
+                    );
+                }
+            }
+
+
+            console.log(
+                "Returning Last Episode items:",
+                metas.length
+            );
+
+
+            return {
+                metas:
+                    metas,
+
+                cacheMaxAge:
+                    60
+            };
+        }
+
+
+        /*
+         * ==================================================
+         * NEXT EPISODES
+         * ==================================================
          */
 
         if (
@@ -702,17 +886,6 @@ builder.defineCatalogHandler(async (args) => {
                 const watched =
                     latestEpisodes[i];
 
-
-                /*
-                 * The next episode normally has:
-                 *
-                 * same season
-                 * episode + 1
-                 *
-                 * Example:
-                 *
-                 * S03E10 -> S03E11
-                 */
 
                 const nextEpisode =
                     watched.episode + 1;
@@ -752,20 +925,9 @@ builder.defineCatalogHandler(async (args) => {
                         await nextResponse.text();
 
 
-                    /*
-                     * If MDBList returns a 404 or the page
-                     * doesn't contain an IMDb ID, there is
-                     * no usable next episode.
-                     */
                     if (
                         !nextResponse.ok
                     ) {
-
-                        console.log(
-                            "No next episode:",
-                            watched.showName,
-                            watched.code
-                        );
 
                         continue;
                     }
@@ -784,22 +946,10 @@ builder.defineCatalogHandler(async (args) => {
 
 
                     if (!imdbId) {
-
-                        console.log(
-                            "Next episode has no IMDb ID:",
-                            watched.showName,
-                            watched.season,
-                            nextEpisode
-                        );
-
                         continue;
                     }
 
 
-                    /*
-                     * Try to get the actual next episode
-                     * title from the page.
-                     */
                     const nextTitleMatch =
                         nextHtml.match(
                             /<h1[^>]*>([\s\S]*?)<\/h1>/i
