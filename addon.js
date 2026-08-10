@@ -7,29 +7,20 @@ const manifest = {
     id: "com.example.mdblist-history",
     version: "1.0.0",
     name: "MDBList History",
-    description: "Shows your recently watched movies and series from MDBList.",
+    description: "Shows your recently watched items from MDBList.",
 
     resources: ["catalog"],
 
-    types: ["movie", "series"],
+    types: ["movie"],
 
     catalogs: [
         {
+            id: "mdblist-history",
             type: "movie",
-            id: "mdblist-history-movies",
-            name: "MDBList History"
-        },
-        {
-            type: "series",
-            id: "mdblist-history-series",
             name: "MDBList History"
         }
     ],
 
-    /*
-     * This tells Stremio that the addon has
-     * user-configurable settings.
-     */
     config: [
         {
             key: "apiKey",
@@ -49,36 +40,98 @@ const builder = new addonBuilder(manifest);
 
 
 /*
- * Get watched items from MDBList.
+ * Ask MDBList for watched movies.
  */
-async function getWatched(apiKey, mediaType) {
+async function getWatchedMovies(apiKey) {
 
-    const params = new URLSearchParams({
-        apikey: apiKey,
-        mediatype: mediaType,
-        limit: "1000"
-    });
+    const url =
+        "https://api.mdblist.com/sync/watched" +
+        "?apikey=" +
+        encodeURIComponent(apiKey) +
+        "&mediatype=movie" +
+        "&limit=1000" +
+        "&append_to_response=poster";
 
-    const response = await fetch(
-        `https://api.mdblist.com/sync/watched?${params}`
+    console.log("Calling MDBList watched movies API");
+
+    const response = await fetch(url);
+
+    const text = await response.text();
+
+    console.log(
+        "MDBList HTTP status:",
+        response.status
     );
 
     if (!response.ok) {
-        const errorText = await response.text();
-
         throw new Error(
-            `MDBList API returned ${response.status}: ${errorText}`
+            `MDBList returned HTTP ${response.status}: ${text}`
         );
     }
 
-    return response.json();
+    return JSON.parse(text);
 }
 
 
 /*
- * Convert an MDBList item into a Stremio catalog item.
+ * Ask MDBList for watched shows.
  */
-function convertItem(item, stremioType) {
+async function getWatchedShows(apiKey) {
+
+    const url =
+        "https://api.mdblist.com/sync/watched" +
+        "?apikey=" +
+        encodeURIComponent(apiKey) +
+        "&mediatype=show" +
+        "&limit=1000" +
+        "&append_to_response=poster";
+
+    console.log("Calling MDBList watched shows API");
+
+    const response = await fetch(url);
+
+    const text = await response.text();
+
+    console.log(
+        "MDBList HTTP status:",
+        response.status
+    );
+
+    if (!response.ok) {
+        throw new Error(
+            `MDBList returned HTTP ${response.status}: ${text}`
+        );
+    }
+
+    return JSON.parse(text);
+}
+
+
+/*
+ * Get the actual array from an MDBList response.
+ */
+function getItems(data) {
+
+    if (Array.isArray(data)) {
+        return data;
+    }
+
+    if (Array.isArray(data.items)) {
+        return data.items;
+    }
+
+    if (Array.isArray(data.results)) {
+        return data.results;
+    }
+
+    return [];
+}
+
+
+/*
+ * Convert an MDBList item to a Stremio item.
+ */
+function convertItem(item, type) {
 
     const imdbId =
         item.imdb_id ||
@@ -86,12 +139,17 @@ function convertItem(item, stremioType) {
         item.ids?.imdb;
 
     if (!imdbId) {
+        console.log(
+            "Skipping MDBList item without IMDb ID:",
+            item.title || item.name
+        );
+
         return null;
     }
 
-    const result = {
+    const meta = {
         id: imdbId,
-        type: stremioType,
+        type: type,
         name:
             item.title ||
             item.name ||
@@ -99,84 +157,132 @@ function convertItem(item, stremioType) {
     };
 
     if (item.poster) {
-        result.poster = item.poster;
+        meta.poster = item.poster;
     }
 
     if (item.images?.poster) {
-        result.poster = item.images.poster;
+        meta.poster = item.images.poster;
     }
 
     if (item.year) {
-        result.releaseInfo = String(item.year);
+        meta.releaseInfo =
+            String(item.year);
     }
 
-    return result;
+    meta.posterShape = "poster";
+
+    return meta;
 }
 
 
 /*
- * Handle catalog requests from Stremio.
+ * Stremio asks us for the MDBList History catalog.
  */
 builder.defineCatalogHandler(async (args) => {
 
+    console.log(
+        "CATALOG REQUEST:",
+        JSON.stringify({
+            type: args.type,
+            id: args.id,
+            hasConfig: !!args.config,
+            hasApiKey: !!args.config?.apiKey
+        })
+    );
+
     /*
-     * The API key entered on the Stremio
-     * configuration page arrives here.
+     * Make sure this is our catalog.
      */
-    const apiKey = args.config?.apiKey;
-
-    if (!apiKey) {
-        console.log("No MDBList API key configured.");
-
+    if (args.id !== "mdblist-history") {
         return {
             metas: []
         };
     }
 
     /*
-     * Stremio "series" corresponds to
-     * MDBList "show".
+     * Get the API key supplied through
+     * the Stremio configuration.
      */
-    const mdblistMediaType =
-        args.type === "series"
-            ? "show"
-            : "movie";
+    const apiKey =
+        args.config?.apiKey;
+
+    if (!apiKey) {
+
+        console.log(
+            "ERROR: No MDBList API key received."
+        );
+
+        return {
+            metas: []
+        };
+    }
 
     try {
 
+        /*
+         * Get both watched movies and watched shows.
+         */
+        const [
+            movieData,
+            showData
+        ] = await Promise.all([
+            getWatchedMovies(apiKey),
+            getWatchedShows(apiKey)
+        ]);
+
+        const movies =
+            getItems(movieData);
+
+        const shows =
+            getItems(showData);
+
         console.log(
-            `Requesting MDBList watched ${mdblistMediaType} items`
+            "MDBList movies:",
+            movies.length
         );
 
-        const data = await getWatched(
-            apiKey,
-            mdblistMediaType
+        console.log(
+            "MDBList shows:",
+            shows.length
         );
 
         /*
-         * Handle the possible response container.
+         * Convert movies.
          */
-        const items =
-            Array.isArray(data)
-                ? data
-                : (
-                    data.items ||
-                    data.results ||
-                    []
-                );
-
-        const metas = items
-            .map(item =>
-                convertItem(
-                    item,
-                    args.type
+        const movieMetas =
+            movies
+                .map(item =>
+                    convertItem(
+                        item,
+                        "movie"
+                    )
                 )
-            )
-            .filter(Boolean)
-            .slice(0, 100);
+                .filter(Boolean);
+
+        /*
+         * Convert shows.
+         */
+        const showMetas =
+            shows
+                .map(item =>
+                    convertItem(
+                        item,
+                        "series"
+                    )
+                )
+                .filter(Boolean);
+
+        /*
+         * Combine them into one catalog.
+         */
+        const metas = [
+            ...movieMetas,
+            ...showMetas
+        ];
 
         console.log(
-            `Returning ${metas.length} items`
+            "Returning catalog items:",
+            metas.length
         );
 
         return {
@@ -187,7 +293,7 @@ builder.defineCatalogHandler(async (args) => {
     } catch (error) {
 
         console.error(
-            "MDBList request failed:",
+            "MDBList catalog error:",
             error
         );
 
@@ -199,11 +305,12 @@ builder.defineCatalogHandler(async (args) => {
 
 
 /*
- * Start the Stremio addon server.
+ * Start the addon.
  */
 serveHTTP(
     builder.getInterface(),
     {
-        port: process.env.PORT || 7000
+        port:
+            process.env.PORT || 7000
     }
 );
