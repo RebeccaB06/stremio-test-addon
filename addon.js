@@ -642,8 +642,7 @@ builder.defineCatalogHandler(async (args) => {
 
                     metas.push({
 
-                        id:
-                           ${imdbId}:${item.season}:${item.episode}`,
+                      id: `${imdbId}:${item.season}:${item.episode}`,
 
                         type:
                             "series",
@@ -814,7 +813,7 @@ builder.defineCatalogHandler(async (args) => {
                     metas.push({
 
                         id:
-                            `${item.imdbId || imdbId}:${item.season}:${item.episode}`,
+                            imdbId,
 
                         type:
                             "series",
@@ -1002,7 +1001,7 @@ builder.defineCatalogHandler(async (args) => {
                     metas.push({
 
                         id:
-                           `${imdbId}:${watched.season}:${nextEpisode}`,
+                            imdbId,
 
                         type:
                             "series",
