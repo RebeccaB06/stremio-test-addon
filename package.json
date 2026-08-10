@@ -1,7 +1,7 @@
 {
-  "name": "stremio-test-addon",
+  "name": "stremio-mdblist-history",
   "version": "1.0.0",
-  "description": "Simple Stremio addon test",
+  "description": "Stremio addon showing MDBList watched items",
   "main": "addon.js",
   "scripts": {
     "start": "node addon.js"
