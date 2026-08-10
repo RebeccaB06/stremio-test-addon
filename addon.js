@@ -109,7 +109,9 @@ builder.defineCatalogHandler(async (args) => {
         };
     }
 
-    const apiKey = args.config?.apiKey;
+ const apiKey =
+    args.config?.apiKey ||
+    args.extra?.apiKey;
 
     if (!apiKey) {
         return {
