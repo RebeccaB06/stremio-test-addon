@@ -5,7 +5,7 @@ const {
 } = require("stremio-addon-sdk");
 
 const builder = new addonBuilder({
-    id: "com.example.mdblist-recently-watched",
+    id: "com.rebeccabijkerk.mdblist-recently-watched",
     version: "6.0.0",
     name: "MDBList Recently Watched",
     description: "MDBList Recently Watched",
