@@ -1,15 +1,22 @@
 ```javascript
-const stremio = require("stremio-addon-sdk");
+const {
+    addonBuilder,
+    serveHTTP
+} = require("stremio-addon-sdk");
 
-const addon = new stremio.addonBuilder({
+const builder = new addonBuilder({
     id: "com.example.mdblist-recently-watched",
-    version: "5.1.0",
+    version: "6.0.0",
     name: "MDBList Recently Watched",
-    description: "Shows recently watched MDBList episodes.",
+    description: "MDBList Recently Watched",
 
-    resources: ["catalog"],
+    resources: [
+        "catalog"
+    ],
 
-    types: ["series"],
+    types: [
+        "series"
+    ],
 
     catalogs: [
         {
@@ -23,8 +30,7 @@ const addon = new stremio.addonBuilder({
         {
             key: "username",
             type: "text",
-            title: "MDBList Username",
-            required: true
+            title: "MDBList Username"
         }
     ],
 
@@ -35,223 +41,26 @@ const addon = new stremio.addonBuilder({
 });
 
 
-addon.defineCatalogHandler(function(args) {
+builder.defineCatalogHandler(function(args) {
 
-    return new Promise(function(resolve) {
-
-        if (
-            args.id !==
-            "mdblist-recently-watched"
-        ) {
-            resolve({
-                metas: []
-            });
-
-            return;
-        }
-
-
-        var config =
-            args.config || {};
-
-
-        var username =
-            config.username || "";
-
-
-        username =
-            String(username).trim();
-
-
-        if (!username) {
-
-            console.log(
-                "MDBList username is missing."
-            );
-
-            resolve({
-                metas: []
-            });
-
-            return;
-        }
-
-
-        var url =
-            "https://mdblist.com/history/" +
-            encodeURIComponent(username) +
-            "?type=episode";
-
-
-        console.log(
-            "Fetching MDBList history:"
-        );
-
-        console.log(url);
-
-
-        fetch(
-            url,
+    return Promise.resolve({
+        metas: [
             {
-                headers: {
-                    "User-Agent":
-                        "Mozilla/5.0"
-                }
+                id: "tt0111161",
+                type: "series",
+                name: "TEST - Addon Working",
+                releaseInfo: "S01E01"
             }
-        )
-        .then(function(response) {
-
-            console.log(
-                "MDBList HTTP status:",
-                response.status
-            );
-
-            return response.text();
-
-        })
-        .then(function(html) {
-
-            console.log(
-                "MDBList response length:",
-                html.length
-            );
-
-
-            /*
-             * FIRST TEST:
-             *
-             * Determine whether MDBList actually
-             * returned episode information.
-             */
-            var episodeMatches =
-                html.match(
-                    /\bS[0-9]{1,3}E[0-9]{1,3}\b/gi
-                );
-
-
-            var count =
-                episodeMatches
-                    ? episodeMatches.length
-                    : 0;
-
-
-            console.log(
-                "Episode references found:",
-                count
-            );
-
-
-            /*
-             * If the page contains no episodes,
-             * don't pretend it did.
-             */
-            if (count === 0) {
-
-                console.log(
-                    "No SxxExx entries found."
-                );
-
-
-                if (
-                    html.indexOf(
-                        "This profile is private"
-                    ) !== -1
-                ) {
-
-                    console.log(
-                        "MDBList says the profile is private."
-                    );
-
-                }
-
-
-                resolve({
-                    metas: []
-                });
-
-                return;
-            }
-
-
-            /*
-             * For this diagnostic version,
-             * create one catalog item for every
-             * SxxExx we found.
-             *
-             * This proves the History page can
-             * actually be read before we build
-             * the final HTML parser.
-             */
-            var metas = [];
-
-
-            for (
-                var i = 0;
-                i < count && i < 100;
-                i++
-            ) {
-
-                var code =
-                    episodeMatches[i];
-
-
-                metas.push({
-                    id:
-                        "mdblist-history-" +
-                        i,
-
-                    type:
-                        "series",
-
-                    name:
-                        "MDBList Recently Watched",
-
-                    releaseInfo:
-                        code,
-
-                    description:
-                        "Watched episode " +
-                        code
-                });
-            }
-
-
-            console.log(
-                "Returning catalog items:",
-                metas.length
-            );
-
-
-            resolve({
-                metas: metas,
-                cacheMaxAge: 60
-            });
-
-        })
-        .catch(function(error) {
-
-            console.error(
-                "MDBList request failed:"
-            );
-
-            console.error(error);
-
-
-            resolve({
-                metas: []
-            });
-
-        });
-
+        ]
     });
+
 });
 
 
-stremio.serveHTTP(
-    addon.getInterface(),
+serveHTTP(
+    builder.getInterface(),
     {
-        port:
-            process.env.PORT || 7000
+        port: process.env.PORT || 7000
     }
 );
 ```
