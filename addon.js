@@ -171,12 +171,10 @@ builder.defineCatalogHandler(async (args) => {
 });
 
 
-/*
- * Start server
- */
 serveHTTP(
     builder.getInterface(),
     {
-        port: process.env.PORT || 7000
+        port: process.env.PORT || 7000,
+        static: "./public"
     }
 );
