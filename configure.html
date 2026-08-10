@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>MDBList History</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 60px auto;
+            padding: 20px;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            box-sizing: border-box;
+            margin: 10px 0;
+        }
+
+        button {
+            padding: 12px 20px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>MDBList History</h1>
+
+    <p>
+        Enter your MDBList API key.
+    </p>
+
+    <input
+        id="apiKey"
+        type="password"
+        placeholder="MDBList API key"
+    >
+
+    <br>
+
+    <button onclick="install()">
+        Install Addon
+    </button>
+
+    <script>
+
+        function install() {
+
+            const apiKey =
+                document
+                    .getElementById("apiKey")
+                    .value
+                    .trim();
+
+            if (!apiKey) {
+                alert("Please enter your MDBList API key.");
+                return;
+            }
+
+            /*
+             * Get the URL of this configuration page.
+             */
+            const url =
+                new URL(
+                    window.location.href
+                );
+
+            /*
+             * Remove /configure.html
+             */
+            const baseUrl =
+                url.origin;
+
+            /*
+             * Stremio user-data configuration.
+             */
+            const addonUrl =
+                baseUrl +
+                "/manifest.json?" +
+                "apiKey=" +
+                encodeURIComponent(apiKey);
+
+            /*
+             * Open Stremio and ask it to install
+             * the configured addon.
+             */
+            window.location.href =
+                "stremio://" +
+                addonUrl.replace(
+                    /^https?:\/\//,
+                    ""
+                );
+        }
+
+    </script>
+
+</body>
+</html>
