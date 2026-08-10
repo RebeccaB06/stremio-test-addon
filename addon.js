@@ -190,6 +190,504 @@ function convertItem(item, type) {
     return meta;
 }
 
+builder.defineMetaHandler(async (args) => {
+
+    console.log(
+        "META REQUEST:",
+        JSON.stringify({
+            type: args.type,
+            id: args.id
+        })
+    );
+
+
+    /*
+     * We only handle our temporary MDBList IDs.
+     */
+    if (
+        args.type !== "series" ||
+        !args.id ||
+        !args.id.startsWith("mdblist:")
+    ) {
+
+        return {
+            meta: null
+        };
+    }
+
+
+    /*
+     * Recover the MDBList episode URL path.
+     *
+     * Example:
+     *
+     * mdblist:%2Fshow%2F8pw7-angel%2Fseason%2F3%2Fepisode%2F10
+     *
+     * becomes:
+     *
+     * /show/8pw7-angel/season/3/episode/10
+     */
+    let episodePath;
+
+    try {
+
+        episodePath =
+            decodeURIComponent(
+                args.id.substring(
+                    "mdblist:".length
+                )
+            );
+
+    } catch (error) {
+
+        console.error(
+            "Could not decode MDBList ID:",
+            error
+        );
+
+        return {
+            meta: null
+        };
+    }
+
+
+    /*
+     * Verify the path and extract season/episode.
+     */
+    const pathMatch =
+        episodePath.match(
+            /^\/show\/([^/]+)\/season\/([0-9]+)\/episode\/([0-9]+)$/i
+        );
+
+
+    if (!pathMatch) {
+
+        console.error(
+            "Invalid MDBList episode path:",
+            episodePath
+        );
+
+        return {
+            meta: null
+        };
+    }
+
+
+    const season =
+        Number(
+            pathMatch[2]
+        );
+
+
+    const episode =
+        Number(
+            pathMatch[3]
+        );
+
+
+    /*
+     * THIS is the only MDBList page request.
+     *
+     * It happens only after the item is opened.
+     */
+    const url =
+        "https://mdblist.com" +
+        episodePath;
+
+
+    console.log(
+        "Fetching clicked episode:",
+        url
+    );
+
+
+    try {
+
+        const response =
+            await fetch(url);
+
+
+        const html =
+            await response.text();
+
+
+        console.log(
+            "MDBList episode HTTP status:",
+            response.status
+        );
+
+
+        console.log(
+            "MDBList episode HTML length:",
+            html.length
+        );
+
+
+        if (!response.ok) {
+
+            throw new Error(
+                "MDBList returned HTTP " +
+                response.status
+            );
+        }
+
+
+        /*
+         * --------------------------------------------------
+         * Find the IMDb link on the MDBList episode page.
+         *
+         * MDBList pages contain links such as:
+         *
+         * https://www.imdb.com/title/tt1234567/
+         *
+         * We deliberately do this only NOW, after
+         * the user has opened the item.
+         * --------------------------------------------------
+         */
+
+        const imdbMatches =
+            [
+                ...html.matchAll(
+                    /https?:\/\/(?:www\.)?imdb\.com\/title\/(tt[0-9]+)/gi
+                )
+            ];
+
+
+        /*
+         * Remove duplicates while preserving order.
+         */
+        const imdbIds =
+            [
+                ...new Set(
+                    imdbMatches.map(
+                        function(match) {
+                            return match[1];
+                        }
+                    )
+                )
+            ];
+
+
+        console.log(
+            "IMDb IDs found:",
+            imdbIds
+        );
+
+
+        if (
+            imdbIds.length === 0
+        ) {
+
+            console.error(
+                "No IMDb ID found on MDBList episode page."
+            );
+
+            return {
+                meta: null
+            };
+        }
+
+
+        /*
+         * The episode page can contain both an IMDb
+         * series link and an IMDb episode link.
+         *
+         * We need the SERIES IMDb ID for the meta ID.
+         *
+         * MDBList's page HTML normally contains the
+         * series IMDb link as well as the episode data.
+         *
+         * First try to identify the series link from
+         * the page's show section.
+         */
+
+
+        let seriesImdbId =
+            null;
+
+
+        /*
+         * Look for an IMDb title link associated with
+         * the show/series section.
+         *
+         * We first look for links occurring before the
+         * episode IMDb information.
+         */
+        const episodeImdbMatch =
+            html.match(
+                /https?:\/\/(?:www\.)?imdb\.com\/title\/(tt[0-9]+)/i
+            );
+
+
+        /*
+         * Collect all IMDb IDs.
+         *
+         * If MDBList exposes the series IMDb ID directly
+         * in the page, use the first distinct title ID.
+         */
+        if (
+            imdbIds.length === 1
+        ) {
+
+            seriesImdbId =
+                imdbIds[0];
+
+        } else {
+
+            /*
+             * Try to find the IMDb link in the show
+             * navigation area.
+             */
+            const showSectionMatch =
+                html.match(
+                    /(?:Show|Series|IMDb)[\s\S]{0,3000}?https?:\/\/(?:www\.)?imdb\.com\/title\/(tt[0-9]+)/i
+                );
+
+
+            if (
+                showSectionMatch
+            ) {
+
+                seriesImdbId =
+                    showSectionMatch[1];
+            }
+        }
+
+
+        /*
+         * If the page has multiple IDs and we couldn't
+         * confidently identify the series ID, use the
+         * first one as the series ID.
+         *
+         * We don't make another request.
+         */
+        if (
+            !seriesImdbId &&
+            imdbIds.length > 0
+        ) {
+
+            seriesImdbId =
+                imdbIds[0];
+        }
+
+
+        if (
+            !seriesImdbId
+        ) {
+
+            console.error(
+                "Could not determine IMDb series ID."
+            );
+
+            return {
+                meta: null
+            };
+        }
+
+
+        /*
+         * --------------------------------------------------
+         * Extract the episode title from the MDBList page.
+         * --------------------------------------------------
+         */
+
+        let episodeTitle =
+            "";
+
+
+        /*
+         * Look for the episode heading.
+         *
+         * Example:
+         *
+         * S3E10 - Dad
+         */
+        const headingMatch =
+            html.match(
+                /<h[1-6][^>]*>\s*(?:S[0-9]+E[0-9]+\s*-\s*)?([\s\S]*?)<\/h[1-6]>/i
+            );
+
+
+        if (
+            headingMatch
+        ) {
+
+            episodeTitle =
+                headingMatch[1]
+                    .replace(
+                        /<[^>]+>/g,
+                        ""
+                    )
+                    .replace(
+                        /&amp;/g,
+                        "&"
+                    )
+                    .replace(
+                        /&quot;/g,
+                        '"'
+                    )
+                    .replace(
+                        /&#39;/g,
+                        "'"
+                    )
+                    .replace(
+                        /\s+/g,
+                        " "
+                    )
+                    .trim();
+        }
+
+
+        /*
+         * --------------------------------------------------
+         * Try to obtain the show name.
+         * --------------------------------------------------
+         */
+
+        let showName =
+            "";
+
+
+        const titleMatch =
+            html.match(
+                /<title[^>]*>\s*([^<]+?)\s*(?:\||-)\s*mdblist/i
+            );
+
+
+        if (
+            titleMatch
+        ) {
+
+            showName =
+                titleMatch[1]
+                    .replace(
+                        /\s+/g,
+                        " "
+                    )
+                    .trim();
+        }
+
+
+        /*
+         * Fallback to the MDBList slug.
+         */
+        if (!showName) {
+
+            showName =
+                pathMatch[1]
+                    .replace(
+                        /^[^-]+-/,
+                        ""
+                    )
+                    .replace(
+                        /-/g,
+                        " "
+                    )
+                    .replace(
+                        /\b\w/g,
+                        function(letter) {
+                            return letter.toUpperCase();
+                        }
+                    );
+        }
+
+
+        /*
+         * --------------------------------------------------
+         * IMPORTANT:
+         *
+         * This is now the NORMAL Stremio structure.
+         *
+         * Meta ID:
+         *
+         *     ttSERIES
+         *
+         * Video ID:
+         *
+         *     ttSERIES:season:episode
+         *
+         * Example:
+         *
+         *     tt11198330
+         *     tt11198330:1:2
+         * --------------------------------------------------
+         */
+
+        const videoId =
+            seriesImdbId +
+            ":" +
+            season +
+            ":" +
+            episode;
+
+
+        console.log(
+            "Returning normal Stremio episode:",
+            JSON.stringify({
+                seriesId:
+                    seriesImdbId,
+                videoId:
+                    videoId,
+                season:
+                    season,
+                episode:
+                    episode
+            })
+        );
+
+
+        return {
+
+            meta: {
+
+                id:
+                    seriesImdbId,
+
+                type:
+                    "series",
+
+                name:
+                    showName,
+
+                videos: [
+
+                    {
+                        id:
+                            videoId,
+
+                        title:
+                            episodeTitle ||
+                            (
+                                "Episode " +
+                                episode
+                            ),
+
+                        season:
+                            season,
+
+                        episode:
+                            episode
+                    }
+
+                ]
+            }
+        };
+
+
+    } catch (error) {
+
+        console.error(
+            "MDBList meta error:",
+            error
+        );
+
+
+        return {
+            meta: null
+        };
+    }
+});
+
 builder.defineCatalogHandler(async (args) => {
 
     console.log(
