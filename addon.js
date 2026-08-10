@@ -9,7 +9,7 @@ const manifest = {
     name: "MDBList History",
     description: "Shows your recently watched items from MDBList.",
 
-  resources: ["catalog"],
+resources: ["catalog", "meta"],
 
 
     types: ["series"],
@@ -190,6 +190,24 @@ function convertItem(item, type) {
 
     return meta;
 }
+
+builder.defineMetaHandler(async (args) => {
+    // Check if the request is for an episode ID (e.g. tt1234567:1:5)
+    const parts = args.id.split(":");
+    if (parts.length === 3) {
+        const [imdbId, season, episode] = parts;
+        return {
+            meta: {
+                id: args.id,
+                type: "series",
+                name: `Episode S${season}E${episode}`,
+                // Points Stremio to the parent series so it knows where to draw show info from
+                videos: []
+            }
+        };
+    }
+    return { meta: null };
+});
 
 builder.defineCatalogHandler(async (args) => {
 
