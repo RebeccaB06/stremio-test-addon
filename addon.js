@@ -6,9 +6,17 @@ const builder = new addonBuilder({
     name: "Addon Working Test",
     description: "Simple Stremio addon test",
 
+    // This addon only provides streams.
     resources: ["stream"],
+
+    // It supports movies.
     types: ["movie"],
-    idPrefixes: ["tt"]
+
+    // Movie IDs are IMDb IDs such as tt1234567.
+    idPrefixes: ["tt"],
+
+    // We don't provide any catalogs.
+    catalogs: []
 });
 
 builder.defineStreamHandler(async (args) => {
