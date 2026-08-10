@@ -1,0 +1,12 @@
+{
+  "name": "stremio-test-addon",
+  "version": "1.0.0",
+  "description": "Simple Stremio addon test",
+  "main": "addon.js",
+  "scripts": {
+    "start": "node addon.js"
+  },
+  "dependencies": {
+    "stremio-addon-sdk": "^1.6.10"
+  }
+}
