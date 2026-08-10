@@ -11,7 +11,7 @@ description: "Shows your recently watched items from MDBList.",
 
 resources: ["catalog"],
 
-types: ["series"],
+types: ["movie"],
 
 catalogs: [
     {
