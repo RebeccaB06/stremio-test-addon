@@ -812,8 +812,7 @@ builder.defineCatalogHandler(async (args) => {
 
                     metas.push({
 
-                        id:
-                            imdbId,
+                       id: `${item.imdbId || imdbId}:${item.season}:${item.episode}`,
 
                         type:
                             "series",
@@ -1000,8 +999,7 @@ builder.defineCatalogHandler(async (args) => {
 
                     metas.push({
 
-                        id:
-                            imdbId,
+                      id: `${imdbId}:${watched.season}:${nextEpisode}`,
 
                         type:
                             "series",
