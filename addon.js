@@ -181,6 +181,7 @@ function convertItem(item, type) {
 }
 
 
+
 builder.defineCatalogHandler(async (args) => {
 
     console.log(
@@ -197,11 +198,13 @@ builder.defineCatalogHandler(async (args) => {
         })
     );
 
+
     if (args.id !== "mdblist-history") {
         return {
             metas: []
         };
     }
+
 
     const username =
         args.config &&
@@ -209,7 +212,9 @@ builder.defineCatalogHandler(async (args) => {
             ? args.config.username
             : "";
 
+
     if (!username) {
+
         console.log(
             "ERROR: No MDBList username received."
         );
@@ -219,103 +224,416 @@ builder.defineCatalogHandler(async (args) => {
         };
     }
 
-    const url =
+
+    const historyUrl =
         "https://mdblist.com/history/" +
         encodeURIComponent(username) +
         "?type=episode";
 
+
     console.log(
         "Fetching:",
-        url
+        historyUrl
     );
+
 
     try {
 
         const response =
-            await fetch(url);
+            await fetch(historyUrl);
+
 
         const html =
             await response.text();
+
 
         console.log(
             "MDBList HTTP status:",
             response.status
         );
 
+
         console.log(
             "MDBList HTML length:",
             html.length
         );
 
+
         if (!response.ok) {
+
             throw new Error(
                 "MDBList returned HTTP " +
                 response.status
             );
         }
 
-        /*
-         * Find episode numbers in the returned page.
-         */
-        const matches =
-            html.match(
-                /\bS[0-9]{1,3}E[0-9]{1,3}\b/gi
-            );
 
-        const count =
-            matches
-                ? matches.length
-                : 0;
+        /*
+         * MDBList uses:
+         *
+         * <div class="activity-poster-card">
+         *
+         * Each card contains:
+         *
+         * /show/.../season/.../episode/...
+         *
+         * poster
+         * title
+         * episode number
+         * episode title
+         */
+
+
+        const cardRegex =
+            /<div class="activity-poster-card">([\s\S]*?)<\/div>\s*<\/div>/gi;
+
+
+        const cards = [];
+
+
+        let cardMatch;
+
+
+        while (
+            (cardMatch =
+                cardRegex.exec(html)) !== null
+        ) {
+
+            const card =
+                cardMatch[1];
+
+
+            /*
+             * Episode URL
+             */
+            const urlMatch =
+                card.match(
+                    /href="(\/show\/[^"]+\/season\/[0-9]+\/episode\/[0-9]+)"/i
+                );
+
+
+            if (!urlMatch) {
+                continue;
+            }
+
+
+            const episodePath =
+                urlMatch[1];
+
+
+            /*
+             * Poster
+             */
+            const posterMatch =
+                card.match(
+                    /<img[^>]+src="([^"]+)"/i
+                );
+
+
+            const poster =
+                posterMatch
+                    ? posterMatch[1]
+                    : null;
+
+
+            /*
+             * Title from:
+             *
+             * Buffy the Vampire Slayer S06E13
+             */
+            const titleMatch =
+                card.match(
+                    /<div class="activity-poster-card__title">\s*<a[^>]*>([\s\S]*?)<\/a>/i
+                );
+
+
+            let title =
+                titleMatch
+                    ? titleMatch[1]
+                    : "";
+
+
+            title =
+                title
+                    .replace(
+                        /<[^>]+>/g,
+                        ""
+                    )
+                    .replace(
+                        /&amp;/g,
+                        "&"
+                    )
+                    .replace(
+                        /&quot;/g,
+                        '"'
+                    )
+                    .replace(
+                        /&#39;/g,
+                        "'"
+                    )
+                    .replace(
+                        /\s+/g,
+                        " "
+                    )
+                    .trim();
+
+
+            /*
+             * Episode title:
+             *
+             * Dead Things
+             */
+            const episodeTitleMatch =
+                card.match(
+                    /<div class="activity-poster-card__sub">\s*([\s\S]*?)\s*<\/div>/i
+                );
+
+
+            let episodeTitle =
+                episodeTitleMatch
+                    ? episodeTitleMatch[1]
+                    : "";
+
+
+            episodeTitle =
+                episodeTitle
+                    .replace(
+                        /<[^>]+>/g,
+                        ""
+                    )
+                    .replace(
+                        /&amp;/g,
+                        "&"
+                    )
+                    .replace(
+                        /&quot;/g,
+                        '"'
+                    )
+                    .replace(
+                        /&#39;/g,
+                        "'"
+                    )
+                    .replace(
+                        /\s+/g,
+                        " "
+                    )
+                    .trim();
+
+
+            /*
+             * S06E13
+             */
+            const episodeMatch =
+                title.match(
+                    /\bS([0-9]+)E([0-9]+)\b/i
+                );
+
+
+            if (!episodeMatch) {
+                continue;
+            }
+
+
+            const season =
+                Number(
+                    episodeMatch[1]
+                );
+
+
+            const episode =
+                Number(
+                    episodeMatch[2]
+                );
+
+
+            const code =
+                "S" +
+                episodeMatch[1] +
+                "E" +
+                episodeMatch[2];
+
+
+            /*
+             * Remove S06E13 from the show title.
+             */
+            const showName =
+                title
+                    .replace(
+                        /\s*S[0-9]+E[0-9]+\s*$/i,
+                        ""
+                    )
+                    .trim();
+
+
+            cards.push({
+                path:
+                    episodePath,
+
+                showName:
+                    showName,
+
+                episodeTitle:
+                    episodeTitle,
+
+                season:
+                    season,
+
+                episode:
+                    episode,
+
+                code:
+                    code,
+
+                poster:
+                    poster
+            });
+        }
+
 
         console.log(
-            "Episode entries found:",
-            count
+            "MDBList episode cards found:",
+            cards.length
         );
+
+
+        /*
+         * Now resolve the actual IMDb episode IDs.
+         *
+         * MDBList's episode page contains the IMDb
+         * episode ID.
+         */
+
 
         const metas = [];
 
-        if (matches) {
 
-            for (
-                let i = 0;
-                i < matches.length &&
-                i < 100;
-                i++
-            ) {
+        for (
+            let i = 0;
+            i < cards.length &&
+            i < 100;
+            i++
+        ) {
 
-                const code =
-                    matches[i].toUpperCase();
+            const item =
+                cards[i];
 
+
+            const episodeUrl =
+                "https://mdblist.com" +
+                item.path;
+
+
+            console.log(
+                "Fetching episode:",
+                episodeUrl
+            );
+
+
+            try {
+
+                const episodeResponse =
+                    await fetch(
+                        episodeUrl
+                    );
+
+
+                const episodeHtml =
+                    await episodeResponse.text();
+
+
+                /*
+                 * MDBList episode pages contain:
+                 *
+                 * tt1234567
+                 *
+                 * for the IMDb episode.
+                 */
+                const imdbMatch =
+                    episodeHtml.match(
+                        /\btt[0-9]{7,9}\b/
+                    );
+
+
+                const imdbId =
+                    imdbMatch
+                        ? imdbMatch[0]
+                        : null;
+
+
+                console.log(
+                    "Episode IMDb ID:",
+                    imdbId
+                );
+
+
+                if (!imdbId) {
+
+                    console.log(
+                        "No IMDb ID found for:",
+                        item.showName,
+                        item.code
+                    );
+
+                    continue;
+                }
+
+
+                /*
+                 * Return the actual IMDb episode ID.
+                 *
+                 * This is no longer a fake
+                 * mdblist-history-123 ID.
+                 */
                 metas.push({
+
                     id:
-                        "mdblist-history-" +
-                        i,
+                        imdbId,
 
                     type:
                         "series",
 
                     name:
-                        "Recently Watched",
+                        item.showName,
+
+                    poster:
+                        item.poster,
+
+                    posterShape:
+                        "poster",
 
                     releaseInfo:
-                        code,
+                        item.code,
 
                     description:
-                        "MDBList History - " +
-                        code
+                        item.episodeTitle
                 });
+
+
+            } catch (episodeError) {
+
+                console.error(
+                    "Episode lookup failed:",
+                    episodeUrl,
+                    episodeError
+                );
             }
         }
+
 
         console.log(
             "Returning catalog items:",
             metas.length
         );
 
+
         return {
-            metas: metas,
-            cacheMaxAge: 60
+            metas:
+                metas,
+
+            cacheMaxAge:
+                60
         };
+
 
     } catch (error) {
 
@@ -324,12 +642,12 @@ builder.defineCatalogHandler(async (args) => {
             error
         );
 
+
         return {
             metas: []
         };
     }
 });
-
 
 
 
