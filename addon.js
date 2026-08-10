@@ -1,14 +1,16 @@
-const path = require("path");
+const express = require("express");
 const {
     addonBuilder,
-    serveHTTP
+    getRouter
 } = require("stremio-addon-sdk");
+
+const app = express();
 
 const manifest = {
     id: "com.example.mdblist-history",
     version: "1.0.0",
     name: "MDBList History",
-    description: "Shows recently watched movies and series from MDBList.",
+    description: "Shows your recently watched MDBList movies and series.",
 
     resources: ["catalog"],
 
@@ -17,17 +19,15 @@ const manifest = {
     catalogs: [
         {
             type: "movie",
-            id: "mdblist-history",
+            id: "mdblist-history-movies",
             name: "MDBList History"
         },
         {
             type: "series",
-            id: "mdblist-history",
+            id: "mdblist-history-series",
             name: "MDBList History"
         }
     ],
-
-    idPrefixes: ["tt"],
 
     behaviorHints: {
         configurable: true,
@@ -39,24 +39,149 @@ const builder = new addonBuilder(manifest);
 
 
 /*
- * Get watched items from MDBList.
+ * CONFIGURATION PAGE
+ */
+app.get("/configure", (req, res) => {
+    res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <title>MDBList History - Configure</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 500px;
+            margin: 60px auto;
+            padding: 20px;
+        }
+
+        h1 {
+            margin-bottom: 10px;
+        }
+
+        p {
+            line-height: 1.5;
+        }
+
+        label {
+            display: block;
+            margin-top: 25px;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+
+        input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 12px;
+            font-size: 16px;
+        }
+
+        button {
+            margin-top: 20px;
+            padding: 12px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>MDBList History</h1>
+
+    <p>
+        Enter your MDBList API key below.
+    </p>
+
+    <form id="form">
+
+        <label for="apiKey">
+            MDBList API Key
+        </label>
+
+        <input
+            id="apiKey"
+            name="apiKey"
+            type="password"
+            placeholder="Enter your MDBList API key"
+            required
+        >
+
+        <button type="submit">
+            Install Addon
+        </button>
+
+    </form>
+
+    <script>
+        document
+            .getElementById("form")
+            .addEventListener("submit", function(event) {
+
+                event.preventDefault();
+
+                const apiKey =
+                    document
+                        .getElementById("apiKey")
+                        .value
+                        .trim();
+
+                if (!apiKey) {
+                    return;
+                }
+
+                /*
+                 * User-specific data is placed in the
+                 * addon URL, as supported by Stremio.
+                 */
+                const addonUrl =
+                    window.location.origin +
+                    "/" +
+                    encodeURIComponent(apiKey) +
+                    "/manifest.json";
+
+                /*
+                 * Open Stremio with the configured addon.
+                 */
+                window.location.href =
+                    "stremio://" +
+                    addonUrl.replace(
+                        /^https?:\\/\\//,
+                        ""
+                    );
+            });
+    </script>
+
+</body>
+</html>
+    `);
+});
+
+
+/*
+ * MDBLIST API
  */
 async function getWatched(apiKey, mediaType) {
-    const params = new URLSearchParams({
-        apikey: apiKey,
-        mediatype: mediaType,
-        limit: "1000"
-    });
 
-    const response = await fetch(
-        `https://api.mdblist.com/sync/watched?${params}`
-    );
+    const url =
+        "https://api.mdblist.com/sync/watched" +
+        "?apikey=" +
+        encodeURIComponent(apiKey) +
+        "&mediatype=" +
+        encodeURIComponent(mediaType) +
+        "&limit=1000";
+
+    const response =
+        await fetch(url);
 
     if (!response.ok) {
-        const text = await response.text();
-
         throw new Error(
-            `MDBList API error ${response.status}: ${text}`
+            `MDBList returned HTTP ${response.status}`
         );
     }
 
@@ -65,9 +190,10 @@ async function getWatched(apiKey, mediaType) {
 
 
 /*
- * Convert an MDBList item into a Stremio MetaPreview.
+ * Convert MDBList item to Stremio catalog item.
  */
-function toStremioMeta(item, type) {
+function convertItem(item, type) {
+
     const imdbId =
         item.imdb_id ||
         item.imdbid ||
@@ -77,38 +203,42 @@ function toStremioMeta(item, type) {
         return null;
     }
 
-    const name =
-        item.title ||
-        item.name ||
-        "Unknown";
-
-    const meta = {
+    return {
         id: imdbId,
-        type,
-        name
+
+        type: type,
+
+        name:
+            item.title ||
+            item.name ||
+            "Unknown",
+
+        poster:
+            item.poster ||
+            item.images?.poster,
+
+        releaseInfo:
+            item.year
+                ? String(item.year)
+                : undefined,
+
+        posterShape: "poster"
     };
-
-    if (item.poster) {
-        meta.poster = item.poster;
-    }
-
-    if (item.year) {
-        meta.releaseInfo = String(item.year);
-    }
-
-    return meta;
 }
 
 
 /*
- * MDBList watched catalog.
+ * CATALOG HANDLER
  */
 builder.defineCatalogHandler(async (args) => {
+
     const apiKey =
         args.config?.apiKey;
 
     if (!apiKey) {
-        console.log("No MDBList API key supplied.");
+        console.log(
+            "No MDBList API key supplied."
+        );
 
         return {
             metas: []
@@ -121,8 +251,9 @@ builder.defineCatalogHandler(async (args) => {
             : "movie";
 
     try {
+
         console.log(
-            `Loading MDBList watched ${mediaType} items...`
+            `Requesting MDBList watched ${mediaType} items`
         );
 
         const data =
@@ -140,18 +271,19 @@ builder.defineCatalogHandler(async (args) => {
                     []
                 );
 
-        const metas = items
-            .map(item =>
-                toStremioMeta(
-                    item,
-                    args.type
+        const metas =
+            items
+                .map(item =>
+                    convertItem(
+                        item,
+                        args.type
+                    )
                 )
-            )
-            .filter(Boolean)
-            .slice(0, 100);
+                .filter(Boolean)
+                .slice(0, 100);
 
         console.log(
-            `Returning ${metas.length} items.`
+            `Returning ${metas.length} items`
         );
 
         return {
@@ -160,8 +292,9 @@ builder.defineCatalogHandler(async (args) => {
         };
 
     } catch (error) {
+
         console.error(
-            "MDBList request failed:",
+            "MDBList error:",
             error
         );
 
@@ -173,17 +306,30 @@ builder.defineCatalogHandler(async (args) => {
 
 
 /*
- * Start the addon server.
+ * Mount the Stremio addon routes.
  */
-serveHTTP(
-    builder.getInterface(),
-    {
-        port: process.env.PORT || 7000,
+const addonRouter =
+    getRouter(
+        builder.getInterface()
+    );
 
-        // Serves files from ./public
-        static: path.join(
-            __dirname,
-            "public"
-        )
+app.use(
+    "/",
+    addonRouter
+);
+
+
+/*
+ * Start server.
+ */
+const port =
+    process.env.PORT || 7000;
+
+app.listen(
+    port,
+    () => {
+        console.log(
+            `MDBList History addon running on port ${port}`
+        );
     }
 );
