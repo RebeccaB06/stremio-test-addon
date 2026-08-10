@@ -9,14 +9,11 @@ const manifest = {
     name: "MDBList History",
     description: "Shows your recently watched items from MDBList.",
 
-    resources: [
-        "catalog",
-        {
-            name: "meta",
-            types: ["series"],
-            idPrefixes: ["mdblist:"]
-        }
-    ],
+resources: [
+    "catalog",
+    "stream"
+],
+
 
     types: ["series"],
 
