@@ -194,127 +194,6 @@ function convertItem(item, type) {
     return meta;
 }
 
-builder.defineStreamHandler(async (args) => {
-
-    console.log(
-        "STREAM REQUEST:",
-        JSON.stringify({
-            type: args.type,
-            id: args.id
-        })
-    );
-
-
-    /*
-     * We only handle IMDb series episode IDs.
-     *
-     * Example:
-     *
-     * tt0452716:1:1
-     */
-    if (
-        args.type !== "series" ||
-        !args.id ||
-        !/^tt[0-9]+:[0-9]+:[0-9]+$/.test(args.id)
-    ) {
-
-        return {
-            streams: []
-        };
-    }
-
-
-    const streamId =
-        args.id;
-
-
-    console.log(
-        "Looking up streams for:",
-        streamId
-    );
-
-
-    try {
-
-        /*
-         * ==================================================
-         * PUT YOUR STREAM-SOURCE REQUEST HERE.
-         *
-         * The important thing is that the requested ID is
-         * passed through EXACTLY as:
-         *
-         * tt0452716:1:1
-         *
-         * ==================================================
-         */
-
-        const url =
-            "YOUR_STREAMS_REPO_URL/" +
-            encodeURIComponent(streamId);
-
-
-        console.log(
-            "Fetching streams:",
-            url
-        );
-
-
-        const response =
-            await fetch(url);
-
-
-        const text =
-            await response.text();
-
-
-        console.log(
-            "Streams HTTP status:",
-            response.status
-        );
-
-
-        if (!response.ok) {
-
-            throw new Error(
-                "Streams source returned HTTP " +
-                response.status +
-                ": " +
-                text
-            );
-        }
-
-
-        const data =
-            JSON.parse(text);
-
-
-        /*
-         * Return the streams exactly as Stremio expects.
-         */
-        return {
-
-            streams:
-                Array.isArray(data.streams)
-                    ? data.streams
-                    : []
-
-        };
-
-
-    } catch (error) {
-
-        console.error(
-            "Stream lookup error:",
-            error
-        );
-
-
-        return {
-            streams: []
-        };
-    }
-});
-
 builder.defineCatalogHandler(async (args) => {
 
     console.log(
@@ -323,13 +202,17 @@ builder.defineCatalogHandler(async (args) => {
             type: args.type,
             id: args.id,
             hasConfig: !!args.config,
-            hasUsername: !!args.config?.username
+            hasUsername:
+                !!(
+                    args.config &&
+                    args.config.username
+                )
         })
     );
 
 
     /*
-     * Only handle our catalogs.
+     * Only handle our three catalogs.
      */
     if (
         args.id !== "mdblist-history" &&
@@ -343,7 +226,10 @@ builder.defineCatalogHandler(async (args) => {
 
 
     const username =
-        args.config?.username;
+        args.config &&
+        args.config.username
+            ? args.config.username
+            : "";
 
 
     if (!username) {
@@ -358,12 +244,6 @@ builder.defineCatalogHandler(async (args) => {
     }
 
 
-    /*
-     * --------------------------------------------------
-     * Fetch MDBList history.
-     * --------------------------------------------------
-     */
-
     const historyUrl =
         "https://mdblist.com/history/" +
         encodeURIComponent(username) +
@@ -371,12 +251,20 @@ builder.defineCatalogHandler(async (args) => {
 
 
     console.log(
-        "Fetching:",
+        "Fetching history:",
         historyUrl
     );
 
 
     try {
+
+        /*
+         * ==================================================
+         * STEP 1
+         *
+         * Fetch MDBList history.
+         * ==================================================
+         */
 
         const response =
             await fetch(historyUrl);
@@ -408,13 +296,23 @@ builder.defineCatalogHandler(async (args) => {
 
 
         /*
-         * --------------------------------------------------
-         * Parse day groups and episode cards.
-         * --------------------------------------------------
+         * ==================================================
+         * STEP 2
+         *
+         * Extract each day-group separately.
+         *
+         * Example:
+         *
+         * <div class="day-group"
+         *      data-date="2026-08-08">
+         *
+         * This lets us attach the date to every
+         * episode inside that group.
+         * ==================================================
          */
 
         const dayRegex =
-            /<div class="day-group"[^>]*data-date="([^"]+)"[^>]*>([\s\S]*?)(?=<div class="day-group"|$)/gi;
+            /<div class="day-group"[^>]*data-date="([^"]+)"[^>]*>([\s\S]*?)<\/div>\s*(?=<div class="day-group"|$)/gi;
 
 
         const history =
@@ -437,6 +335,9 @@ builder.defineCatalogHandler(async (args) => {
                 dayMatch[2];
 
 
+            /*
+             * Find activity cards inside this date.
+             */
             const cardRegex =
                 /<div class="activity-poster-card">([\s\S]*?)<\/div>\s*<\/div>/gi;
 
@@ -454,21 +355,21 @@ builder.defineCatalogHandler(async (args) => {
 
 
                 /*
-                 * MDBList episode path.
+                 * Episode URL.
                  */
-                const pathMatch =
+                const urlMatch =
                     card.match(
                         /href="(\/show\/[^"]+\/season\/[0-9]+\/episode\/[0-9]+)"/i
                     );
 
 
-                if (!pathMatch) {
+                if (!urlMatch) {
                     continue;
                 }
 
 
-                const path =
-                    pathMatch[1];
+                const episodePath =
+                    urlMatch[1];
 
 
                 /*
@@ -487,6 +388,8 @@ builder.defineCatalogHandler(async (args) => {
 
 
                 /*
+                 * Show title + episode code.
+                 *
                  * Example:
                  *
                  * Buffy the Vampire Slayer S06E13
@@ -530,6 +433,10 @@ builder.defineCatalogHandler(async (args) => {
 
                 /*
                  * Episode title.
+                 *
+                 * Example:
+                 *
+                 * Dead Things
                  */
                 const episodeTitleMatch =
                     card.match(
@@ -569,7 +476,7 @@ builder.defineCatalogHandler(async (args) => {
 
 
                 /*
-                 * SxxExx
+                 * Find SxxExx.
                  */
                 const episodeMatch =
                     title.match(
@@ -595,7 +502,7 @@ builder.defineCatalogHandler(async (args) => {
 
 
                 /*
-                 * Show name without SxxExx.
+                 * Remove SxxExx from title.
                  */
                 const showName =
                     title
@@ -609,7 +516,7 @@ builder.defineCatalogHandler(async (args) => {
                 history.push({
 
                     path:
-                        path,
+                        episodePath,
 
                     showName:
                         showName,
@@ -640,18 +547,19 @@ builder.defineCatalogHandler(async (args) => {
 
 
         console.log(
-            "Episode entries found:",
+            "Total history cards:",
             history.length
         );
 
 
         /*
-         * --------------------------------------------------
-         * IMPORTANT:
+         * ==================================================
+         * STEP 3
          *
-         * First take 100.
-         * THEN remove duplicate shows.
-         * --------------------------------------------------
+         * FIRST apply the 100-item limit.
+         *
+         * This applies to ALL THREE catalogs.
+         * ==================================================
          */
 
         const first100 =
@@ -662,33 +570,27 @@ builder.defineCatalogHandler(async (args) => {
 
 
         console.log(
-            "First 100 history entries:",
+            "History entries used:",
             first100.length
         );
 
 
         /*
-         * History catalog keeps all 100.
+         * ==================================================
+         * HISTORY CATALOG
+         *
+         * All first 100 entries.
+         *
+         * NO duplicate removal.
+         * ==================================================
          */
-        let selectedItems;
-
 
         if (
             args.id === "mdblist-history"
         ) {
 
-            selectedItems =
-                first100;
-
-        } else {
-
-            /*
-             * Last Episode / Next Episodes:
-             * keep only the newest episode for each show.
-             */
-
-            const latestByShow =
-                {};
+            const metas =
+                [];
 
 
             for (
@@ -701,393 +603,466 @@ builder.defineCatalogHandler(async (args) => {
                     first100[i];
 
 
-                const key =
-                    item.showName
-                        .toLowerCase()
-                        .trim();
+                const episodeUrl =
+                    "https://mdblist.com" +
+                    item.path;
 
 
-                if (
-                    !latestByShow[key]
-                ) {
+                console.log(
+                    "Fetching history episode:",
+                    episodeUrl
+                );
 
-                    latestByShow[key] =
-                        item;
+
+                try {
+
+                    const episodeResponse =
+                        await fetch(
+                            episodeUrl
+                        );
+
+
+                    const episodeHtml =
+                        await episodeResponse.text();
+
+
+                    const imdbMatch =
+                        episodeHtml.match(
+                            /\btt[0-9]{7,9}\b/
+                        );
+
+
+                    const imdbId =
+                        imdbMatch
+                            ? imdbMatch[0]
+                            : null;
+
+
+                    if (!imdbId) {
+                        continue;
+                    }
+
+
+                    metas.push({
+
+                        id:
+                            imdbId,
+
+                        type:
+                            "series",
+
+                        name:
+                            item.showName,
+
+                        poster:
+                            item.poster,
+
+                        posterShape:
+                            "poster",
+
+                        releaseInfo:
+                            item.code,
+
+                        description:
+                            item.episodeTitle +
+                            " • Watched " +
+                            item.watchedDate
+                    });
+
+
+                } catch (error) {
+
+                    console.error(
+                        "History episode request failed:",
+                        episodeUrl
+                    );
                 }
             }
 
 
-            selectedItems =
-                Object.keys(
-                    latestByShow
-                ).map(
-                    function(key) {
-                        return latestByShow[key];
-                    }
-                );
+            console.log(
+                "Returning History items:",
+                metas.length
+            );
+
+
+            return {
+                metas:
+                    metas,
+
+                cacheMaxAge:
+                    60
+            };
         }
 
 
+        /*
+         * ==================================================
+         * STEP 4
+         *
+         * Create newest-per-show list.
+         *
+         * This is done ONLY from the first 100.
+         * ==================================================
+         */
+
+        const latestByShow =
+            {};
+
+
+        for (
+            let i = 0;
+            i < first100.length;
+            i++
+        ) {
+
+            const item =
+                first100[i];
+
+
+            const showKey =
+                item.showName
+                    .toLowerCase()
+                    .trim();
+
+
+            /*
+             * Because MDBList history is newest first,
+             * the first occurrence is the newest episode.
+             */
+            if (
+                !latestByShow[showKey]
+            ) {
+
+                latestByShow[showKey] =
+                    item;
+            }
+        }
+
+
+        const latestEpisodes =
+            Object.keys(
+                latestByShow
+            ).map(
+                function(key) {
+                    return latestByShow[key];
+                }
+            );
+
+
         console.log(
-            "Selected items:",
-            selectedItems.length
+            "Unique shows in first 100:",
+            latestEpisodes.length
         );
 
 
         /*
-         * --------------------------------------------------
-         * For Next Episodes, calculate the next episode.
-         * --------------------------------------------------
+         * ==================================================
+         * LAST EPISODE OF SHOW WATCHED
+         * ==================================================
+         */
+
+        if (
+            args.id === "mdblist-last-episode"
+        ) {
+
+            const metas =
+                [];
+
+
+            for (
+                let i = 0;
+                i < latestEpisodes.length;
+                i++
+            ) {
+
+                const item =
+                    latestEpisodes[i];
+
+
+                const episodeUrl =
+                    "https://mdblist.com" +
+                    item.path;
+
+
+                try {
+
+                    const episodeResponse =
+                        await fetch(
+                            episodeUrl
+                        );
+
+
+                    const episodeHtml =
+                        await episodeResponse.text();
+
+
+                    const imdbMatch =
+                        episodeHtml.match(
+                            /\btt[0-9]{7,9}\b/
+                        );
+
+
+                    const imdbId =
+                        imdbMatch
+                            ? imdbMatch[0]
+                            : null;
+
+
+                    if (!imdbId) {
+                        continue;
+                    }
+
+
+                    metas.push({
+
+                        id:
+                            imdbId,
+
+                        type:
+                            "series",
+
+                        name:
+                            item.showName,
+
+                        poster:
+                            item.poster,
+
+                        posterShape:
+                            "poster",
+
+                        releaseInfo:
+                            item.code,
+
+                        description:
+                            item.episodeTitle +
+                            " • Watched " +
+                            item.watchedDate
+                    });
+
+
+                } catch (error) {
+
+                    console.error(
+                        "Last episode request failed:",
+                        episodeUrl
+                    );
+                }
+            }
+
+
+            console.log(
+                "Returning Last Episode items:",
+                metas.length
+            );
+
+
+            return {
+                metas:
+                    metas,
+
+                cacheMaxAge:
+                    60
+            };
+        }
+
+
+        /*
+         * ==================================================
+         * NEXT EPISODES
+         * ==================================================
          */
 
         if (
             args.id === "mdblist-next-episodes"
         ) {
 
-            selectedItems =
-                selectedItems.map(
-                    function(item) {
-
-                        return {
-
-                            ...item,
-
-                            episode:
-                                item.episode + 1,
-
-                            code:
-                                "S" +
-                                String(
-                                    item.season
-                                ) +
-                                "E" +
-                                String(
-                                    item.episode + 1
-                                )
-                        };
-                    }
-                );
-        }
+            const metas =
+                [];
 
 
-        /*
-         * --------------------------------------------------
-         * NOW resolve IMDb IDs.
-         *
-         * This is intentionally done AFTER the 100-entry
-         * limit and duplicate filtering.
-         *
-         * Therefore:
-         *
-         * History:
-         *   max 100 IMDb requests
-         *
-         * Last Episode:
-         *   max 100 IMDb requests, usually much fewer
-         *
-         * Next Episodes:
-         *   max 100 IMDb requests, usually much fewer
-         * --------------------------------------------------
-         */
-
-        const metas =
-            [];
-
-
-        for (
-            let i = 0;
-            i < selectedItems.length;
-            i++
-        ) {
-
-            const item =
-                selectedItems[i];
-
-
-            /*
-             * The MDBList page to inspect.
-             *
-             * For normal history / last episode this is
-             * the watched episode.
-             *
-             * For next episodes this is the NEXT episode.
-             */
-            let episodePath =
-                item.path;
-
-
-            if (
-                args.id === "mdblist-next-episodes"
+            for (
+                let i = 0;
+                i < latestEpisodes.length;
+                i++
             ) {
 
-                episodePath =
-                    episodePath.replace(
-                        /\/season\/[0-9]+\/episode\/[0-9]+$/i,
-                        "/season/" +
-                        item.season +
-                        "/episode/" +
-                        item.episode
-                    );
-            }
+                const watched =
+                    latestEpisodes[i];
 
 
-            const episodeUrl =
-                "https://mdblist.com" +
-                episodePath;
+                const nextEpisode =
+                    watched.episode + 1;
 
 
-            console.log(
-                "Resolving IMDb for:",
-                episodeUrl
-            );
-
-
-            try {
-
-                const episodeResponse =
-                    await fetch(
-                        episodeUrl
-                    );
-
-
-                const episodeHtml =
-                    await episodeResponse.text();
-
-
-                if (
-                    !episodeResponse.ok
-                ) {
-
-                    console.log(
-                        "Skipping IMDb lookup, HTTP:",
-                        episodeResponse.status
-                    );
-
-                    continue;
-                }
-
-
-                /*
-                 * Find IMDb title links.
-                 */
-                const imdbMatches =
-                    [
-                        ...episodeHtml.matchAll(
-                            /https?:\/\/(?:www\.)?imdb\.com\/title\/(tt[0-9]+)/gi
+                const nextEpisodeUrl =
+                    "https://mdblist.com/show/" +
+                    watched.path
+                        .replace(
+                            /^\/show\//,
+                            ""
                         )
-                    ];
-
-
-                const imdbIds =
-                    [
-                        ...new Set(
-                            imdbMatches.map(
-                                function(match) {
-                                    return match[1];
-                                }
-                            )
-                        )
-                    ];
-
-
-                if (
-                    imdbIds.length === 0
-                ) {
-
-                    console.log(
-                        "No IMDb ID found for:",
-                        item.showName,
-                        item.code
-                    );
-
-                    continue;
-                }
-
-
-                /*
-                 * Try to identify the SERIES IMDb ID.
-                 *
-                 * Prefer an IMDb ID appearing in a
-                 * series/show context.
-                 */
-                let seriesImdbId =
-                    null;
-
-
-                for (
-                    let j = 0;
-                    j < imdbIds.length;
-                    j++
-                ) {
-
-                    const candidate =
-                        imdbIds[j];
-
-
-                    const escapedCandidate =
-                        candidate.replace(
-                            /[.*+?^${}()|[\]\\]/g,
-                            "\\$&"
+                        .replace(
+                            /\/season\/[0-9]+\/episode\/[0-9]+$/i,
+                            "/season/" +
+                            watched.season +
+                            "/episode/" +
+                            nextEpisode
                         );
-
-
-                    const contextRegex =
-                        new RegExp(
-                            "[\\s\\S]{0,1500}" +
-                            "imdb\\.com\\/title\\/" +
-                            escapedCandidate +
-                            "[\\s\\S]{0,1500}",
-                            "i"
-                        );
-
-
-                    const contextMatch =
-                        episodeHtml.match(
-                            contextRegex
-                        );
-
-
-                    if (
-                        contextMatch &&
-                        /series|tvseries|show|parent/i
-                            .test(
-                                contextMatch[0]
-                            )
-                    ) {
-
-                        seriesImdbId =
-                            candidate;
-
-                        break;
-                    }
-                }
-
-
-                /*
-                 * If only one IMDb ID exists, use it.
-                 */
-                if (
-                    !seriesImdbId &&
-                    imdbIds.length === 1
-                ) {
-
-                    seriesImdbId =
-                        imdbIds[0];
-                }
-
-
-                /*
-                 * If there are multiple IDs and no
-                 * obvious series marker, use the first.
-                 *
-                 * This keeps the catalog populated rather
-                 * than silently dropping the item.
-                 */
-                if (
-                    !seriesImdbId
-                ) {
-
-                    seriesImdbId =
-                        imdbIds[0];
-                }
-
-
-                /*
-                 * --------------------------------------------------
-                 * THIS IS THE KEY CHANGE.
-                 *
-                 * The catalog item's ID is already:
-                 *
-                 * tt11198330:1:2
-                 *
-                 * So when Stremio calls load(), it receives:
-                 *
-                 * type=series
-                 * id=tt11198330:1:2
-                 * --------------------------------------------------
-                 */
-
-                const stremioId =
-                    seriesImdbId +
-                    ":" +
-                    item.season +
-                    ":" +
-                    item.episode;
-
-
-                metas.push({
-
-                    id:
-                        stremioId,
-
-                    type:
-                        "series",
-
-                    name:
-                        item.showName,
-
-                    poster:
-                        item.poster,
-
-                    posterShape:
-                        "poster",
-
-                    releaseInfo:
-                        item.code,
-
-                    description:
-                        item.episodeTitle +
-                        (
-                            item.watchedDate
-                                ? " • Watched " +
-                                  item.watchedDate
-                                : ""
-                        )
-                });
 
 
                 console.log(
-                    "Added:",
-                    item.showName,
-                    item.code,
-                    "=>",
-                    stremioId
+                    "Fetching next episode:",
+                    nextEpisodeUrl
                 );
 
 
-            } catch (error) {
+                try {
 
-                console.error(
-                    "IMDb lookup failed for:",
-                    item.showName,
-                    item.code,
-                    error
-                );
+                    const nextResponse =
+                        await fetch(
+                            nextEpisodeUrl
+                        );
+
+
+                    const nextHtml =
+                        await nextResponse.text();
+
+
+                    if (
+                        !nextResponse.ok
+                    ) {
+
+                        continue;
+                    }
+
+
+                    const imdbMatch =
+                        nextHtml.match(
+                            /\btt[0-9]{7,9}\b/
+                        );
+
+
+                    const imdbId =
+                        imdbMatch
+                            ? imdbMatch[0]
+                            : null;
+
+
+                    if (!imdbId) {
+                        continue;
+                    }
+
+
+                    const nextTitleMatch =
+                        nextHtml.match(
+                            /<h1[^>]*>([\s\S]*?)<\/h1>/i
+                        );
+
+
+                    let nextTitle =
+                        nextTitleMatch
+                            ? nextTitleMatch[1]
+                            : "";
+
+
+                    nextTitle =
+                        nextTitle
+                            .replace(
+                                /<[^>]+>/g,
+                                ""
+                            )
+                            .replace(
+                                /&amp;/g,
+                                "&"
+                            )
+                            .replace(
+                                /&quot;/g,
+                                '"'
+                            )
+                            .replace(
+                                /&#39;/g,
+                                "'"
+                            )
+                            .replace(
+                                /\s+/g,
+                                " "
+                            )
+                            .trim();
+
+
+                    const nextCode =
+                        "S" +
+                        String(
+                            watched.season
+                        ) +
+                        "E" +
+                        String(
+                            nextEpisode
+                        );
+
+
+                    metas.push({
+
+                        id:
+                            imdbId,
+
+                        type:
+                            "series",
+
+                        name:
+                            watched.showName,
+
+                        poster:
+                            watched.poster,
+
+                        posterShape:
+                            "poster",
+
+                        releaseInfo:
+                            nextCode,
+
+                        description:
+                            nextTitle ||
+                            "Next episode"
+                    });
+
+
+                } catch (error) {
+
+                    console.error(
+                        "Next episode request failed:",
+                        nextEpisodeUrl
+                    );
+                }
             }
+
+
+            console.log(
+                "Returning Next Episodes:",
+                metas.length
+            );
+
+
+            return {
+                metas:
+                    metas,
+
+                cacheMaxAge:
+                    60
+            };
         }
 
 
-        console.log(
-            "Returning catalog items:",
-            metas.length
-        );
-
-
         return {
-
-            metas:
-
-                metas,
-
-            cacheMaxAge:
-                60
+            metas: []
         };
 
 
     } catch (error) {
 
         console.error(
-            "MDBList catalog error:",
+            "MDBList History error:",
             error
         );
 
@@ -1097,6 +1072,8 @@ builder.defineCatalogHandler(async (args) => {
         };
     }
 });
+
+
 
 /*
  * Start the addon.
