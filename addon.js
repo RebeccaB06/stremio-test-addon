@@ -33,7 +33,7 @@ config: [
     type: "text",
     title: "MDBList Username",
     required: true
-},
+}
 ],
 
 behaviorHints: {
