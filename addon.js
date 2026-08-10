@@ -640,31 +640,43 @@ builder.defineCatalogHandler(async (args) => {
                     }
 
 
-                    metas.push({
+metas.push({
+    id: imdbId,
+    type: "series",
+    name: item.showName,
+    poster: item.poster,
+    posterShape: "poster",
+    releaseInfo: item.code,
+    description: item.episodeTitle + " • Watched " + item.watchedDate,
 
-                        id:
-                            imdbId,
+    // NEW: tell Stremio which episode to play
+    videos: [
+        {
+            id: imdbId + ":" + item.season + ":" + item.episode,
+            title: item.code,
+            season: item.season,
+            episode: item.episode
+        }
+    ],
 
-                        type:
-                            "series",
+    // NEW: dummy stream so Stremio opens the player
+    streams: [
+        {
+            title: "Open Player",
+            url: "stremio:///player/" + imdbId + "/" + item.season + "/" + item.episode
+        }
+    ],
 
-                        name:
-                            item.showName,
+    // NEW: same mechanism Stremio uses for Continue Watching
+    behaviorHints: {
+        nextVideos: [
+            {
+                id: imdbId + ":" + item.season + ":" + item.episode
+            }
+        ]
+    }
+});
 
-                        poster:
-                            item.poster,
-
-                        posterShape:
-                            "poster",
-
-                        releaseInfo:
-                            item.code,
-
-                        description:
-                            item.episodeTitle +
-                            " • Watched " +
-                            item.watchedDate
-                    });
 
 
                 } catch (error) {
