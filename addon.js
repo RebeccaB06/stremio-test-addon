@@ -27,7 +27,13 @@ const manifest = {
             type: "password",
             title: "MDBList API Key",
             required: true
-        }
+        },
+        {
+    key: "username",
+    type: "text",
+    title: "MDBList Username",
+    required: true
+},
     ],
 
     behaviorHints: {
