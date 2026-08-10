@@ -198,15 +198,14 @@ builder.defineCatalogHandler(async (args) => {
             type: args.type,
             id: args.id,
             hasConfig: !!args.config,
-            hasUsername:
-                !!(
-                    args.config &&
-                    args.config.username
-                )
+            hasUsername: !!args.config?.username
         })
     );
 
 
+    /*
+     * Only handle our three catalogs.
+     */
     if (
         args.id !== "mdblist-history" &&
         args.id !== "mdblist-last-episode" &&
@@ -219,10 +218,7 @@ builder.defineCatalogHandler(async (args) => {
 
 
     const username =
-        args.config &&
-        args.config.username
-            ? args.config.username
-            : "";
+        args.config?.username;
 
 
     if (!username) {
@@ -244,12 +240,18 @@ builder.defineCatalogHandler(async (args) => {
 
 
     console.log(
-        "Fetching history:",
+        "Fetching:",
         historyUrl
     );
 
 
     try {
+
+        /*
+         * --------------------------------------------------
+         * Fetch MDBList history.
+         * --------------------------------------------------
+         */
 
         const response =
             await fetch(historyUrl);
@@ -281,10 +283,14 @@ builder.defineCatalogHandler(async (args) => {
 
 
         /*
-         * Extract date groups.
+         * --------------------------------------------------
+         * Extract day groups so every episode gets
+         * its watched date.
+         * --------------------------------------------------
          */
+
         const dayRegex =
-            /<div class="day-group"[^>]*data-date="([^"]+)"[^>]*>([\s\S]*?)<\/div>\s*(?=<div class="day-group"|$)/gi;
+            /<div class="day-group"[^>]*data-date="([^"]+)"[^>]*>([\s\S]*?)(?=<div class="day-group"|$)/gi;
 
 
         const history =
@@ -308,7 +314,7 @@ builder.defineCatalogHandler(async (args) => {
 
 
             /*
-             * Extract episode cards.
+             * Extract individual activity cards.
              */
             const cardRegex =
                 /<div class="activity-poster-card">([\s\S]*?)<\/div>\s*<\/div>/gi;
@@ -327,21 +333,25 @@ builder.defineCatalogHandler(async (args) => {
 
 
                 /*
-                 * MDBList episode URL.
+                 * MDBList episode path.
+                 *
+                 * Example:
+                 *
+                 * /show/8pw7-angel/season/3/episode/10
                  */
-                const urlMatch =
+                const pathMatch =
                     card.match(
                         /href="(\/show\/[^"]+\/season\/[0-9]+\/episode\/[0-9]+)"/i
                     );
 
 
-                if (!urlMatch) {
+                if (!pathMatch) {
                     continue;
                 }
 
 
-                const episodePath =
-                    urlMatch[1];
+                const path =
+                    pathMatch[1];
 
 
                 /*
@@ -360,7 +370,11 @@ builder.defineCatalogHandler(async (args) => {
 
 
                 /*
-                 * Show name + SxxExx.
+                 * Main title.
+                 *
+                 * Example:
+                 *
+                 * Angel S03E10
                  */
                 const titleMatch =
                     card.match(
@@ -440,7 +454,7 @@ builder.defineCatalogHandler(async (args) => {
 
 
                 /*
-                 * SxxExx.
+                 * Extract SxxExx.
                  */
                 const episodeMatch =
                     title.match(
@@ -466,7 +480,7 @@ builder.defineCatalogHandler(async (args) => {
 
 
                 /*
-                 * Show name without SxxExx.
+                 * Remove SxxExx from show name.
                  */
                 const showName =
                     title
@@ -480,7 +494,7 @@ builder.defineCatalogHandler(async (args) => {
                 history.push({
 
                     path:
-                        episodePath,
+                        path,
 
                     showName:
                         showName,
@@ -511,17 +525,19 @@ builder.defineCatalogHandler(async (args) => {
 
 
         console.log(
-            "Total history cards:",
+            "Episode entries found:",
             history.length
         );
 
 
         /*
-         * IMPORTANT:
+         * --------------------------------------------------
+         * FIRST 100 ONLY.
          *
-         * Limit to the FIRST 100 before
-         * doing any duplicate removal.
+         * This happens BEFORE deduplication.
+         * --------------------------------------------------
          */
+
         const first100 =
             history.slice(
                 0,
@@ -530,7 +546,7 @@ builder.defineCatalogHandler(async (args) => {
 
 
         console.log(
-            "History entries used:",
+            "Using first 100:",
             first100.length
         );
 
@@ -539,7 +555,10 @@ builder.defineCatalogHandler(async (args) => {
          * --------------------------------------------------
          * HISTORY
          *
-         * All first 100 entries.
+         * Keep every episode.
+         *
+         * IMPORTANT:
+         * No IMDb request happens here.
          * --------------------------------------------------
          */
 
@@ -549,12 +568,15 @@ builder.defineCatalogHandler(async (args) => {
 
             const metas =
                 first100.map(
-                    function(item, index) {
+                    function(item) {
 
                         return {
 
                             /*
-                             * Custom ID.
+                             * Temporary ID containing
+                             * the MDBList episode path.
+                             *
+                             * The IMDb ID is NOT fetched here.
                              */
                             id:
                                 "mdblist:" +
@@ -604,9 +626,11 @@ builder.defineCatalogHandler(async (args) => {
 
         /*
          * --------------------------------------------------
-         * NEWEST EPISODE PER SHOW
+         * DEDUPLICATE AFTER THE 100 LIMIT.
          *
-         * This happens AFTER the 100-item limit.
+         * History is newest-first, so the first
+         * occurrence of each show is its latest
+         * watched episode.
          * --------------------------------------------------
          */
 
@@ -630,11 +654,6 @@ builder.defineCatalogHandler(async (args) => {
                     .trim();
 
 
-            /*
-             * History is newest first.
-             * Therefore the first occurrence is
-             * the latest watched episode.
-             */
             if (
                 !latestByShow[showKey]
             ) {
@@ -656,7 +675,7 @@ builder.defineCatalogHandler(async (args) => {
 
 
         console.log(
-            "Unique shows in first 100:",
+            "Unique shows:",
             latestEpisodes.length
         );
 
@@ -726,6 +745,8 @@ builder.defineCatalogHandler(async (args) => {
         /*
          * --------------------------------------------------
          * NEXT EPISODES
+         *
+         * Still no IMDb requests.
          * --------------------------------------------------
          */
 
@@ -774,6 +795,9 @@ builder.defineCatalogHandler(async (args) => {
 
                 metas.push({
 
+                    /*
+                     * Again, do NOT fetch IMDb here.
+                     */
                     id:
                         "mdblist:" +
                         encodeURIComponent(
@@ -825,7 +849,7 @@ builder.defineCatalogHandler(async (args) => {
     } catch (error) {
 
         console.error(
-            "MDBList History error:",
+            "MDBList catalog error:",
             error
         );
 
