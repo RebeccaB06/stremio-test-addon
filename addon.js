@@ -1,20 +1,13 @@
 ```javascript
-const {
-    addonBuilder,
-    serveHTTP
-} = require("stremio-addon-sdk");
+const { addonBuilder, serveHTTP } = require("stremio-addon-sdk");
 
 const manifest = {
     id: "com.example.mdblist-recently-watched",
-    version: "4.0.0",
-
+    version: "4.1.0",
     name: "MDBList Recently Watched",
-
-    description:
-        "Shows recently watched episodes from MDBList.",
+    description: "Shows recently watched episodes from MDBList.",
 
     resources: ["catalog"],
-
     types: ["series"],
 
     catalogs: [
@@ -50,9 +43,7 @@ const builder = new addonBuilder(manifest);
 
 
 /*
- * Fetch the actual MDBList History page.
- *
- * Example:
+ * Fetch:
  *
  * https://mdblist.com/history/USERNAME?type=episode
  */
@@ -64,10 +55,12 @@ async function getHistoryPage(username) {
         );
 
     const url =
-        `https://mdblist.com/history/${encodedUsername}?type=episode`;
+        "https://mdblist.com/history/" +
+        encodedUsername +
+        "?type=episode";
 
     console.log(
-        "Fetching MDBList history page:",
+        "Fetching:",
         url
     );
 
@@ -75,7 +68,7 @@ async function getHistoryPage(username) {
         await fetch(url, {
             headers: {
                 "User-Agent":
-                    "Mozilla/5.0 (compatible; Stremio MDBList addon)"
+                    "Mozilla/5.0"
             }
         });
 
@@ -83,19 +76,19 @@ async function getHistoryPage(username) {
         await response.text();
 
     console.log(
-        "MDBList history HTTP status:",
+        "MDBList HTTP:",
         response.status
     );
 
     console.log(
-        "MDBList history page length:",
+        "Response length:",
         html.length
     );
 
     if (!response.ok) {
-
         throw new Error(
-            `MDBList history returned HTTP ${response.status}`
+            "MDBList returned HTTP " +
+            response.status
         );
     }
 
@@ -106,54 +99,26 @@ async function getHistoryPage(username) {
 /*
  * Decode common HTML entities.
  */
-function decodeHtml(value) {
+function decodeHtml(text) {
 
-    return String(value)
-        .replace(
-            /&amp;/g,
-            "&"
-        )
-        .replace(
-            /&quot;/g,
-            '"'
-        )
-        .replace(
-            /&#39;/g,
-            "'"
-        )
-        .replace(
-            /&lt;/g,
-            "<"
-        )
-        .replace(
-            /&gt;/g,
-            ">"
-        )
-        .replace(
-            /&#x27;/gi,
-            "'"
-        )
-        .replace(
-            /&#x2F;/gi,
-            "/"
-        )
-        .replace(
-            /&#(\d+);/g,
-            (_, code) =>
-                String.fromCharCode(
-                    Number(code)
-                )
-        );
+    return String(text)
+        .replace(/&amp;/g, "&")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&#x27;/gi, "'")
+        .replace(/&#x2F;/gi, "/");
 }
 
 
 /*
- * Strip HTML tags.
+ * Remove HTML tags.
  */
-function stripTags(value) {
+function stripTags(text) {
 
     return decodeHtml(
-        String(value)
+        String(text)
             .replace(
                 /<script[\s\S]*?<\/script>/gi,
                 ""
@@ -176,33 +141,27 @@ function stripTags(value) {
 
 
 /*
- * Extract an IMDb ID from a string.
+ * Find an IMDb ID.
  */
-function getImdbId(value) {
+function findImdbId(text) {
 
-    if (!value) {
+    const match =
+        String(text).match(
+            /tt\d{7,9}/
+        );
+
+    if (!match) {
         return null;
     }
 
-    const match =
-        String(value).match(
-            /\btt\d{7,9}\b/
-        );
-
-    return match
-        ? match[0]
-        : null;
+    return match[0];
 }
 
 
 /*
- * Try to identify SxxExx.
+ * Find SxxExx.
  */
-function getEpisodeNumber(text) {
-
-    if (!text) {
-        return null;
-    }
+function findEpisodeNumber(text) {
 
     const match =
         String(text).match(
@@ -214,31 +173,21 @@ function getEpisodeNumber(text) {
     }
 
     return {
-        season:
-            Number(match[1]),
-
-        episode:
-            Number(match[2])
+        season: Number(match[1]),
+        episode: Number(match[2])
     };
 }
 
 
 /*
- * Find title + episode information from
- * the History page.
- *
- * MDBList's HTML can change, so this parser
- * deliberately tries several structures.
+ * Parse MDBList history HTML.
  */
 function parseHistory(html) {
 
     const results = [];
 
     /*
-     * First look for links containing IMDb IDs.
-     *
-     * This gives us the strongest possible
-     * Stremio identity.
+     * Find every link in the page.
      */
     const linkRegex =
         /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
@@ -246,63 +195,54 @@ function parseHistory(html) {
     let match;
 
     while (
-        (match =
-            linkRegex.exec(html)) !== null
+        (match = linkRegex.exec(html)) !== null
     ) {
 
-        const href =
-            match[1];
-
-        const inner =
-            match[2];
+        const href = match[1];
 
         const text =
-            stripTags(inner);
+            stripTags(match[2]);
 
         if (!text) {
             continue;
         }
 
-        const imdbId =
-            getImdbId(
-                href
-            );
-
         const episode =
-            getEpisodeNumber(
-                text
-            );
+            findEpisodeNumber(text);
 
-        if (
-            !imdbId ||
-            !episode
-        ) {
+        if (!episode) {
+            continue;
+        }
+
+        /*
+         * Look for IMDb ID in the link itself
+         * or in its surrounding HTML.
+         */
+        let imdbId =
+            findImdbId(href);
+
+        if (!imdbId) {
+            imdbId =
+                findImdbId(match[0]);
+        }
+
+        if (!imdbId) {
             continue;
         }
 
         results.push({
             id: imdbId,
-
-            name: text,
-
-            season:
-                episode.season,
-
-            episode:
-                episode.episode
+            text: text,
+            season: episode.season,
+            episode: episode.episode
         });
     }
 
 
     /*
-     * Second strategy:
-     *
-     * Search the raw HTML for visible SxxExx
-     * entries and nearby IMDb IDs.
+     * If links did not work, search HTML blocks.
      */
-    if (
-        results.length === 0
-    ) {
+    if (results.length === 0) {
 
         const blocks =
             html.split(
@@ -314,23 +254,17 @@ function parseHistory(html) {
         ) {
 
             const text =
-                stripTags(
-                    block
-                );
+                stripTags(block);
 
             const episode =
-                getEpisodeNumber(
-                    text
-                );
+                findEpisodeNumber(text);
 
             if (!episode) {
                 continue;
             }
 
             const imdbId =
-                getImdbId(
-                    block
-                );
+                findImdbId(block);
 
             if (!imdbId) {
                 continue;
@@ -338,14 +272,9 @@ function parseHistory(html) {
 
             results.push({
                 id: imdbId,
-
-                name: text,
-
-                season:
-                    episode.season,
-
-                episode:
-                    episode.episode
+                text: text,
+                season: episode.season,
+                episode: episode.episode
             });
         }
     }
@@ -354,18 +283,19 @@ function parseHistory(html) {
     /*
      * Remove exact duplicates.
      */
-    const seen =
-        new Set();
+    const seen = new Set();
 
     return results.filter(
         item => {
 
             const key =
-                `${item.id}:${item.season}:${item.episode}`;
+                item.id +
+                ":" +
+                item.season +
+                ":" +
+                item.episode;
 
-            if (
-                seen.has(key)
-            ) {
+            if (seen.has(key)) {
                 return false;
             }
 
@@ -378,32 +308,43 @@ function parseHistory(html) {
 
 
 /*
- * Convert parsed HTML entry into Stremio meta.
+ * Convert to Stremio metadata.
  */
-function toMeta(item) {
+function makeMeta(item) {
 
-    const code =
-        `S${String(item.season).padStart(2, "0")}` +
-        `E${String(item.episode).padStart(2, "0")}`;
+    const episodeCode =
+        "S" +
+        String(item.season).padStart(2, "0") +
+        "E" +
+        String(item.episode).padStart(2, "0");
+
 
     /*
-     * Try to remove the episode code from
-     * the title so the catalog displays the
-     * show name cleanly.
+     * Remove the episode code from the text.
      */
     let title =
-        String(
-            item.name || ""
-        )
-        .replace(
+        item.text.replace(
             /\bS\d{1,3}\s*E\d{1,3}\b/i,
             ""
-        )
-        .trim();
+        ).trim();
+
+
+    /*
+     * Remove common surrounding separators.
+     */
+    title =
+        title
+            .replace(
+                /^\s*[-:|•]\s*/,
+                ""
+            )
+            .trim();
+
 
     if (!title) {
         title = "Recently Watched";
     }
+
 
     return {
         id: item.id,
@@ -412,9 +353,9 @@ function toMeta(item) {
 
         name: title,
 
-        releaseInfo: code,
+        releaseInfo: episodeCode,
 
-        description: code,
+        description: episodeCode,
 
         posterShape: "poster",
 
@@ -426,17 +367,13 @@ function toMeta(item) {
 
 
 /*
- * Stremio catalog handler.
+ * Catalog handler.
  */
 builder.defineCatalogHandler(
     async (args) => {
 
         console.log(
-            "================================"
-        );
-
-        console.log(
-            "MDBList Recently Watched"
+            "===== MDBList Recently Watched ====="
         );
 
         console.log(
@@ -445,12 +382,22 @@ builder.defineCatalogHandler(
         );
 
         console.log(
-            "Username:",
-            args.config?.username || "(missing)"
+            "Type:",
+            args.type
         );
 
+        const username =
+            String(
+                args.config &&
+                args.config.username
+                    ? args.config.username
+                    : ""
+            ).trim();
+
+
         console.log(
-            "================================"
+            "Username:",
+            username || "(missing)"
         );
 
 
@@ -464,16 +411,10 @@ builder.defineCatalogHandler(
         }
 
 
-        const username =
-            String(
-                args.config?.username || ""
-            ).trim();
-
-
         if (!username) {
 
             console.log(
-                "ERROR: MDBList username missing."
+                "No MDBList username."
             );
 
             return {
@@ -485,9 +426,7 @@ builder.defineCatalogHandler(
         try {
 
             /*
-             * Fetch exactly:
-             *
-             * /history/USERNAME?type=episode
+             * Fetch the exact URL requested.
              */
             const html =
                 await getHistoryPage(
@@ -496,8 +435,7 @@ builder.defineCatalogHandler(
 
 
             /*
-             * Check for the private-profile
-             * response before attempting parsing.
+             * Log what MDBList actually gave us.
              */
             if (
                 /This profile is private/i.test(
@@ -506,7 +444,22 @@ builder.defineCatalogHandler(
             ) {
 
                 console.log(
-                    "MDBList returned: This profile is private."
+                    "RESULT: MDBList says profile is private."
+                );
+
+                return {
+                    metas: []
+                };
+            }
+
+
+            if (
+                /log.?in/i.test(html) &&
+                /password/i.test(html)
+            ) {
+
+                console.log(
+                    "RESULT: MDBList returned a login page."
                 );
 
                 return {
@@ -516,79 +469,60 @@ builder.defineCatalogHandler(
 
 
             /*
-             * Check whether MDBList sent us
-             * a login page.
+             * Parse episodes.
              */
-            if (
-                /name=["'](?:username|email)["']/i.test(
-                    html
-                ) &&
-                /login/i.test(html)
-            ) {
-
-                console.log(
-                    "MDBList returned a login page."
-                );
-
-                return {
-                    metas: []
-                };
-            }
-
-
-            const entries =
-                parseHistory(
-                    html
-                );
+            const episodes =
+                parseHistory(html);
 
 
             console.log(
-                "Parsed history entries:",
-                entries.length
+                "Parsed episodes:",
+                episodes.length
             );
 
 
+            /*
+             * Print first few parsed entries.
+             */
             for (
                 let i = 0;
                 i < Math.min(
-                    entries.length,
+                    episodes.length,
                     10
                 );
                 i++
             ) {
 
                 console.log(
-                    `${i + 1}.`,
-                    entries[i]
+                    i + 1,
+                    episodes[i]
                 );
             }
 
 
             const metas =
-                entries
+                episodes
                     .slice(0, 100)
                     .map(
-                        toMeta
+                        makeMeta
                     );
 
 
             console.log(
-                "Returning:",
-                metas.length,
-                "catalog items"
+                "Returning catalog items:",
+                metas.length
             );
 
 
             return {
-                metas,
-
+                metas: metas,
                 cacheMaxAge: 60
             };
 
         } catch (error) {
 
             console.error(
-                "MDBList history error:",
+                "MDBList error:",
                 error
             );
 
