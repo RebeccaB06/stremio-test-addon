@@ -184,6 +184,7 @@ function convertItem(item, type) {
 /*
  * Stremio asks us for the MDBList History catalog.
  */
+```javascript
 builder.defineCatalogHandler(async (args) => {
 
     console.log(
@@ -192,122 +193,359 @@ builder.defineCatalogHandler(async (args) => {
             type: args.type,
             id: args.id,
             hasConfig: !!args.config,
-            hasApiKey: !!args.config?.apiKey
+            hasUsername:
+                !!(
+                    args.config &&
+                    args.config.username
+                )
         })
     );
+
 
     /*
      * Make sure this is our catalog.
      */
-    if (args.id !== "mdblist-history") {
+    if (
+        args.id !== "mdblist-history"
+    ) {
         return {
             metas: []
         };
     }
 
-    /*
-     * Get the API key supplied through
-     * the Stremio configuration.
-     */
-    const apiKey =
-        args.config?.apiKey;
 
-    if (!apiKey) {
+    /*
+     * Get the username from the
+     * Stremio configuration.
+     */
+    const username =
+        args.config &&
+        args.config.username
+            ? String(
+                args.config.username
+            ).trim()
+            : "";
+
+
+    if (!username) {
 
         console.log(
-            "ERROR: No MDBList API key received."
+            "ERROR: No MDBList username received."
         );
 
         return {
             metas: []
         };
     }
+
+
+    /*
+     * This is the URL you specified:
+     *
+     * https://mdblist.com/history/USERNAME?type=episode
+     */
+    const url =
+        "https://mdblist.com/history/" +
+        encodeURIComponent(username) +
+        "?type=episode";
+
+
+    console.log(
+        "Fetching MDBList History:",
+        url
+    );
+
 
     try {
 
-        /*
-         * Get both watched movies and watched shows.
-         */
-        const [
-            movieData,
-            showData
-        ] = await Promise.all([
-            getWatchedMovies(apiKey),
-            getWatchedShows(apiKey)
-        ]);
+        const response =
+            await fetch(url, {
+                headers: {
+                    "User-Agent":
+                        "Mozilla/5.0"
+                }
+            });
 
-        const movies =
-            getItems(movieData);
 
-        const shows =
-            getItems(showData);
+        const html =
+            await response.text();
+
 
         console.log(
-            "MDBList movies:",
-            movies.length
+            "MDBList HTTP status:",
+            response.status
         );
 
         console.log(
-            "MDBList shows:",
-            shows.length
+            "MDBList response length:",
+            html.length
         );
 
-        /*
-         * Convert movies.
-         */
-        const movieMetas =
-            movies
-                .map(item =>
-                    convertItem(
-                        item,
-                        "movie"
-                    )
-                )
-                .filter(Boolean);
+
+        if (!response.ok) {
+
+            throw new Error(
+                "MDBList returned HTTP " +
+                response.status
+            );
+        }
+
 
         /*
-         * Convert shows.
+         * Find episode entries in the page.
+         *
+         * We look for S01E01, S1E1, etc.
          */
-        const showMetas =
-            shows
-                .map(item =>
-                    convertItem(
-                        item,
-                        "series"
+        const episodeRegex =
+            /\bS([0-9]{1,3})E([0-9]{1,3})\b/gi;
+
+
+        const episodes = [];
+
+        let match;
+
+
+        while (
+            (match =
+                episodeRegex.exec(html)) !== null
+        ) {
+
+            const season =
+                Number(match[1]);
+
+            const episode =
+                Number(match[2]);
+
+            const code =
+                "S" +
+                String(season).padStart(2, "0") +
+                "E" +
+                String(episode).padStart(2, "0");
+
+
+            /*
+             * Look around the episode occurrence
+             * for the corresponding IMDb ID.
+             */
+            const start =
+                Math.max(
+                    0,
+                    match.index - 2000
+                );
+
+            const end =
+                Math.min(
+                    html.length,
+                    match.index + 2000
+                );
+
+            const surrounding =
+                html.substring(
+                    start,
+                    end
+                );
+
+
+            const imdbMatch =
+                surrounding.match(
+                    /tt[0-9]{7,9}/
+                );
+
+
+            const imdbId =
+                imdbMatch
+                    ? imdbMatch[0]
+                    : null;
+
+
+            /*
+             * Remove HTML tags so we can get
+             * human-readable text.
+             */
+            let title =
+                surrounding
+                    .replace(
+                        /<script[\s\S]*?<\/script>/gi,
+                        " "
                     )
-                )
-                .filter(Boolean);
+                    .replace(
+                        /<style[\s\S]*?<\/style>/gi,
+                        " "
+                    )
+                    .replace(
+                        /<[^>]+>/g,
+                        " "
+                    )
+                    .replace(
+                        /&amp;/g,
+                        "&"
+                    )
+                    .replace(
+                        /&quot;/g,
+                        '"'
+                    )
+                    .replace(
+                        /&#39;/g,
+                        "'"
+                    )
+                    .replace(
+                        /\s+/g,
+                        " "
+                    )
+                    .trim();
+
+
+            /*
+             * Remove the episode number from
+             * the displayed title.
+             */
+            title =
+                title.replace(
+                    new RegExp(
+                        "\\b" +
+                        code +
+                        "\\b",
+                        "i"
+                    ),
+                    ""
+                ).trim();
+
+
+            /*
+             * If the surrounding HTML is too large,
+             * don't use it as the title.
+             */
+            if (
+                title.length > 250
+            ) {
+                title =
+                    "Recently Watched";
+            }
+
+
+            episodes.push({
+                imdbId: imdbId,
+                title:
+                    title ||
+                    "Recently Watched",
+                season: season,
+                episode: episode,
+                code: code
+            });
+        }
+
+
+        console.log(
+            "Episode references found:",
+            episodes.length
+        );
+
 
         /*
-         * Combine them into one catalog.
+         * Remove duplicates.
          */
-        const metas = [
-            ...movieMetas,
-            ...showMetas
-        ];
+        const seen =
+            new Set();
+
+        const uniqueEpisodes =
+            episodes.filter(
+                (item) => {
+
+                    const key =
+                        String(
+                            item.imdbId || ""
+                        ) +
+                        "|" +
+                        item.code +
+                        "|" +
+                        item.title;
+
+
+                    if (
+                        seen.has(key)
+                    ) {
+                        return false;
+                    }
+
+
+                    seen.add(key);
+
+                    return true;
+                }
+            );
+
+
+        /*
+         * Convert the history entries into
+         * Stremio catalog items.
+         */
+        const metas =
+            uniqueEpisodes
+                .slice(0, 100)
+                .map(
+                    (item, index) => {
+
+                        /*
+                         * Use the real IMDb ID when
+                         * we found one.
+                         */
+                        const id =
+                            item.imdbId ||
+                            (
+                                "mdblist-history-" +
+                                index
+                            );
+
+
+                        return {
+                            id: id,
+
+                            type: "series",
+
+                            name:
+                                item.title,
+
+                            releaseInfo:
+                                item.code,
+
+                            description:
+                                "Recently watched " +
+                                item.code,
+
+                            posterShape:
+                                "poster"
+                        };
+                    }
+                );
+
 
         console.log(
             "Returning catalog items:",
             metas.length
         );
 
+
         return {
-            metas,
+            metas: metas,
             cacheMaxAge: 60
         };
+
 
     } catch (error) {
 
         console.error(
-            "MDBList catalog error:",
+            "MDBList History error:",
             error
         );
+
 
         return {
             metas: []
         };
     }
 });
+```
+
 
 
 /*
