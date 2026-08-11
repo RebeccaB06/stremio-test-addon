@@ -646,7 +646,7 @@ builder.defineCatalogHandler(async (args) => {
                             imdbId,
 
                         type:
-                            "movie",
+                            "series",
 
                         name:
                             item.showName,
@@ -817,7 +817,7 @@ builder.defineCatalogHandler(async (args) => {
                             imdbId,
 
                         type:
-                            "movie",
+                            "series",
 
                         name:
                             item.showName,
@@ -1005,7 +1005,7 @@ builder.defineCatalogHandler(async (args) => {
                             imdbId,
 
                         type:
-                            "movie",
+                            "series",
 
                         name:
                             watched.showName,
