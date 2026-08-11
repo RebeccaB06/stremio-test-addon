@@ -14,6 +14,8 @@ const manifest = {
 
     types: ["series"],
 
+    idPrefixes: ["tt"], // <--- REQUIRED so Stremio knows 'tt...' maps to Cinemeta
+
     catalogs: [
         {
             id: "mdblist-history",
