@@ -9,7 +9,7 @@ const manifest = {
     name: "MDBList History",
     description: "Shows your recently watched items from MDBList.",
 
-resources: ["catalog", "meta"],
+  resources: ["catalog"],
 
 
     types: ["series"],
@@ -190,38 +190,7 @@ function convertItem(item, type) {
 
     return meta;
 }
-builder.defineMetaHandler(async (args) => {
-    const parts = args.id.split(":");
-    
-    // Check if the request is an episode ID (e.g., tt1234567:1:5)
-    if (parts.length === 3) {
-        const [imdbId, seasonStr, episodeStr] = parts;
-        const season = parseInt(seasonStr, 10);
-        const episode = parseInt(episodeStr, 10);
 
-        return {
-            meta: {
-                id: imdbId, // MUST be parent show IMDb ID so the back button points to the show
-                type: "series",
-                name: "Show Title Here", // Replace with show title (or fetch from Cinemeta/TMDB)
-                poster: "https://...",   // Parent show poster
-                background: "https://...",
-                description: "Show overview description...",
-                videos: [
-                    {
-                        id: `${imdbId}:${season}:${episode}`,
-                        title: `Episode Title Here`, // Or `S${season}E${episode}`
-                        season: season,
-                        number: episode,
-                        released: new Date().toISOString()
-                    }
-                ]
-            }
-        };
-    }
-
-    return { meta: null };
-});
 builder.defineCatalogHandler(async (args) => {
 
     console.log(
@@ -673,10 +642,11 @@ builder.defineCatalogHandler(async (args) => {
 
                     metas.push({
 
-                      id: `${imdbId}:${item.season}:${item.episode}`,
+                        id:
+                            imdbId,
 
                         type:
-                            "series",
+                            "movie",
 
                         name:
                             item.showName,
@@ -843,10 +813,11 @@ builder.defineCatalogHandler(async (args) => {
 
                     metas.push({
 
-                       id: `${item.imdbId || imdbId}:${item.season}:${item.episode}`,
+                        id:
+                            imdbId,
 
                         type:
-                            "series",
+                            "movie",
 
                         name:
                             item.showName,
@@ -1030,10 +1001,11 @@ builder.defineCatalogHandler(async (args) => {
 
                     metas.push({
 
-                      id: `${imdbId}:${watched.season}:${nextEpisode}`,
+                        id:
+                            imdbId,
 
                         type:
-                            "series",
+                            "movie",
 
                         name:
                             watched.showName,
