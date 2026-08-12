@@ -263,7 +263,7 @@ builder.defineCatalogHandler(async (args) => {
                     releaseInfo: item.code,
                     description: `${item.episodeTitle} • Watched ${item.watchedDate}`,
                    behaviorHints: {
-            defaultVideoId: `${imdbId}:${watched.season}:${watched.episode}`
+            defaultVideoId: `${imdbId}:${item.season}:${item.episode}`
          
         }
                     
