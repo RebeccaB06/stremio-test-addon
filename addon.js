@@ -195,7 +195,7 @@ builder.defineCatalogHandler(async (args) => {
         /* ==================================================
          * CATALOG: HISTORY
          * ================================================== */
-        if (args.id === "mmdblist-complete-history") {
+        if (args.id === "mdblist-complete-history") {
             const metas = [];
 
             for (const item of first100) {
