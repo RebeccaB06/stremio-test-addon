@@ -9,9 +9,9 @@ const manifest = {
     version: "1.0.0",
     name: "MDBList History",
     description: "Shows your recently watched items from MDBList.",
-    resources: ["catalog", "meta"],
+    resources: ["catalog"], // Declare only catalog so metadata falls back to Cinemeta
     types: ["series"],
-    idPrefixes: ["mdblist"], // Only route our custom IDs to this addon
+    idPrefixes: ["tt"],
     catalogs: [
         {
             id: "mdblist-complete-history",
@@ -51,9 +51,8 @@ const manifest = {
 
 const builder = new addonBuilder(manifest);
 
-// In-memory caches
+// In-memory cache to prevent redundant lookups
 const imdbCache = new Map();
-const metaCache = new Map();
 
 /**
  * Clean show name to guarantee only the main series title remains.
@@ -106,74 +105,6 @@ function getSeriesImdbId(showName) {
         });
     });
 }
-
-/**
- * Robust Meta Handler
- * Responds to detail/playback requests for custom mdblist: IDs
- */
-builder.defineMetaHandler(async ({ type, id }) => {
-    console.log(`\n================================================`);
-    console.log(`META REQUEST for ID: ${id}`);
-    console.log(`================================================`);
-
-    // Check if we have this item cached in memory
-    const cached = metaCache.get(id);
-    if (cached) {
-        return {
-            meta: {
-                id: id,
-                type: "series",
-                name: cached.name,
-                poster: cached.poster,
-                posterShape: "poster",
-                background: cached.poster,
-                description: `${cached.episodeTitle ? cached.episodeTitle + ' • ' : ''}Season ${cached.season}, Episode ${cached.episode}`,
-                behaviorHints: {
-                    defaultVideoId: `${cached.imdbId}:${cached.season}:${cached.episode}`
-                },
-                videos: [
-                    {
-                        id: `${cached.imdbId}:${cached.season}:${cached.episode}`,
-                        title: cached.episodeTitle || `Episode ${cached.episode}`,
-                        season: cached.season,
-                        episode: cached.episode,
-                        released: new Date().toISOString() // Required by some strict clients to show item as playable
-                    }
-                ]
-            }
-        };
-    }
-
-    // Fallback if not in memory (e.g., server restart or serverless cold start)
-    const parts = id.split(":");
-    if (parts[0] === "mdblist" && parts.length >= 4) {
-        const imdbId = parts[1];
-        const season = Number(parts[2]);
-        const episode = Number(parts[3]);
-
-        return {
-            meta: {
-                id: id,
-                type: "series",
-                name: "MDBList Item",
-                behaviorHints: {
-                    defaultVideoId: `${imdbId}:${season}:${episode}`
-                },
-                videos: [
-                    {
-                        id: `${imdbId}:${season}:${episode}`,
-                        title: `Season ${season} Episode ${episode}`,
-                        season: season,
-                        episode: episode,
-                        released: new Date().toISOString()
-                    }
-                ]
-            }
-        };
-    }
-
-    return { meta: null };
-});
 
 builder.defineCatalogHandler(async (args) => {
     console.log("\n================================================");
@@ -271,27 +202,17 @@ builder.defineCatalogHandler(async (args) => {
                 const imdbId = await getSeriesImdbId(item.showName);
                 if (!imdbId) continue;
 
-                const metaId = `mdblist:${imdbId}:${item.season}:${item.episode}`;
-
-                // Cache metadata properties
-                metaCache.set(metaId, {
-                    imdbId,
-                    name: item.showName,
-                    poster: item.poster,
-                    season: item.season,
-                    episode: item.episode,
-                    episodeTitle: item.episodeTitle,
-                    watchedDate: item.watchedDate
-                });
-
                 metas.push({
-                    id: metaId,
+                    id: imdbId,
                     type: "series",
                     name: item.showName,
                     poster: item.poster,
                     posterShape: "poster",
                     releaseInfo: item.code,
-                    description: `${item.episodeTitle} • Watched ${item.watchedDate}`
+                    description: `${item.episodeTitle} • Watched ${item.watchedDate}`,
+                    behaviorHints: {
+                        defaultVideoId: `${imdbId}:${item.season}:${item.episode}`
+                    }
                 });
             }
 
@@ -320,27 +241,17 @@ builder.defineCatalogHandler(async (args) => {
                 const imdbId = await getSeriesImdbId(item.showName);
                 if (!imdbId) continue;
 
-                const metaId = `mdblist:${imdbId}:${item.season}:${item.episode}`;
-
-                // Cache metadata properties
-                metaCache.set(metaId, {
-                    imdbId,
-                    name: item.showName,
-                    poster: item.poster,
-                    season: item.season,
-                    episode: item.episode,
-                    episodeTitle: item.episodeTitle,
-                    watchedDate: item.watchedDate
-                });
-
                 metas.push({
-                    id: metaId,
+                    id: imdbId,
                     type: "series",
                     name: item.showName,
                     poster: item.poster,
                     posterShape: "poster",
                     releaseInfo: item.code,
-                    description: `${item.episodeTitle} • Watched ${item.watchedDate}`
+                    description: `${item.episodeTitle} • Watched ${item.watchedDate}`,
+                    behaviorHints: {
+                        defaultVideoId: `${imdbId}:${item.season}:${item.episode}`
+                    }
                 });
             }
 
@@ -360,27 +271,18 @@ builder.defineCatalogHandler(async (args) => {
 
                 const nextEpisode = watched.episode + 1;
                 const nextCode = `S${watched.season}E${nextEpisode}`;
-                const metaId = `mdblist:${imdbId}:${watched.season}:${nextEpisode}`;
-
-                // Cache metadata properties
-                metaCache.set(metaId, {
-                    imdbId,
-                    name: watched.showName,
-                    poster: watched.poster,
-                    season: watched.season,
-                    episode: nextEpisode,
-                    episodeTitle: `Episode ${nextEpisode}`,
-                    watchedDate: null
-                });
 
                 metas.push({
-                    id: metaId,
+                    id: imdbId,
                     type: "series",
                     name: watched.showName,
                     poster: watched.poster,
                     posterShape: "poster",
                     releaseInfo: nextCode,
-                    description: `Next: ${nextCode}`
+                    description: `Next: ${nextCode}`,
+                    behaviorHints: {
+                        defaultVideoId: `${imdbId}:${watched.season}:${nextEpisode}`
+                    }
                 });
             }
 
