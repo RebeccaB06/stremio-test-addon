@@ -260,7 +260,7 @@ builder.defineCatalogHandler(async (args) => {
                     name: item.showName,
                     poster: item.poster,
                     posterShape: "poster",
-                    releaseInfo: item.code,
+                    releaseInfo: item.code  `${item.episodeTitle} • Watched ${item.watchedDate}`,
                     description: `${item.episodeTitle} • Watched ${item.watchedDate}`,
                    behaviorHints: {
             defaultVideoId: `${imdbId}:${item.season}:${item.episode}`
