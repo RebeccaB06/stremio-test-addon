@@ -229,7 +229,7 @@ builder.defineCatalogHandler(async (args) => {
                 });
             }
 
-            return { metas, cacheMaxAge: 60 };
+            return { metas, cacheMaxAge: 10 };
         }
 
         /* Deduplicate for latest episodes */
@@ -270,7 +270,7 @@ builder.defineCatalogHandler(async (args) => {
                 });
             }
 
-            return { metas, cacheMaxAge: 60 };
+            return { metas, cacheMaxAge: 10 };
         }
 
         /* ==================================================
@@ -305,7 +305,7 @@ builder.defineCatalogHandler(async (args) => {
                    console.log ( `${imdbId}:${watched.season}:${nextEpisode}`);
             }
 
-            return { metas, cacheMaxAge: 60 };
+            return { metas, cacheMaxAge: 10 };
         }
 
         return { metas: [] };
