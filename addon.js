@@ -118,7 +118,7 @@ builder.defineMetaHandler(async ({ type, id }) => {
             defaultVideoId: `${id}:${userWatchedSeason}:${userWatchedEpisode}` // e.g. tt0162065:3:18
         };
     }
-
+console.log ("custom meta")
     // 3. Return the full Cinemeta show details + your defaultVideoId
     return { meta };
 });
