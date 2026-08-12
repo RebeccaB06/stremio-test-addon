@@ -51,9 +51,11 @@ const manifest = {
 
 const builder = new addonBuilder(manifest);
 
-// In-memory caches
+// In-memory cache to prevent redundant lookups
 const imdbCache = new Map();
-const episodeCache = new Map();
+
+// In-memory cache to map IMDb ID to the target episode details for the Meta Handler
+const showEpisodeCache = new Map();
 
 /**
  * Clean show name to guarantee only the main series title remains.
@@ -108,25 +110,34 @@ function getSeriesImdbId(showName) {
 }
 
 /**
- * Safe Meta Handler
- * Provides defaultVideoId mapping to prevent crashes while letting Cinemeta load episodes
+ * Fixed Meta Handler:
+ * Returns standard show metadata mapping back to the parent without a custom 'videos' list.
+ * This preserves standard Cinemeta episodes while feeding defaultVideoId to Nuvio's detail player.
  */
 builder.defineMetaHandler(async ({ type, id }) => {
+    console.log(`\n================================================`);
     console.log(`META REQUEST: Fetching details for ${id}`);
-    
-    const cached = episodeCache.get(id);
+    console.log(`================================================`);
+
+    const cached = showEpisodeCache.get(id);
     if (!cached) {
+        console.log(`[META CACHE MISS] No episode mapping found for ID: ${id}`);
         return { meta: null };
     }
+
+    console.log(`[META CACHE HIT] Mapping ${id} to ${cached.showName} S${cached.season}E${cached.episode}`);
 
     return {
         meta: {
             id: id,
             type: "series",
-            name: cached.name,
+            name: cached.showName,
             behaviorHints: {
+                // Pre-selects this exact episode on Nuvio and Stremio details page
                 defaultVideoId: `${id}:${cached.season}:${cached.episode}`
             }
+            // Note: We omit the 'videos' array here. This ensures Cinemeta's 
+            // complete seasons & episodes list loads on the parent show page.
         }
     };
 });
@@ -199,6 +210,7 @@ builder.defineCatalogHandler(async (args) => {
                 const episodeMatch = rawTitle.match(/\bS([0-9]+)E([0-9]+)\b/i);
                 if (!episodeMatch) continue;
 
+                // Extract show title cleanly
                 const showName = cleanShowTitle(rawTitle);
 
                 history.push({
@@ -227,8 +239,9 @@ builder.defineCatalogHandler(async (args) => {
                 const imdbId = await getSeriesImdbId(item.showName);
                 if (!imdbId) continue;
 
-                episodeCache.set(imdbId, {
-                    name: item.showName,
+                // Set mapping details for the meta handler
+                showEpisodeCache.set(imdbId, {
+                    showName: item.showName,
                     season: item.season,
                     episode: item.episode
                 });
@@ -272,8 +285,9 @@ builder.defineCatalogHandler(async (args) => {
                 const imdbId = await getSeriesImdbId(item.showName);
                 if (!imdbId) continue;
 
-                episodeCache.set(imdbId, {
-                    name: item.showName,
+                // Set mapping details for the meta handler
+                showEpisodeCache.set(imdbId, {
+                    showName: item.showName,
                     season: item.season,
                     episode: item.episode
                 });
@@ -309,8 +323,9 @@ builder.defineCatalogHandler(async (args) => {
                 const nextEpisode = watched.episode + 1;
                 const nextCode = `S${watched.season}E${nextEpisode}`;
 
-                episodeCache.set(imdbId, {
-                    name: watched.showName,
+                // Set mapping details for the meta handler (points to next episode)
+                showEpisodeCache.set(imdbId, {
+                    showName: watched.showName,
                     season: watched.season,
                     episode: nextEpisode
                 });
