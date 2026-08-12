@@ -274,7 +274,11 @@ builder.defineCatalogHandler(async (args) => {
                     poster: watched.poster,
                     posterShape: "poster",
                     releaseInfo: nextCode,
-                    description: `Next: ${nextCode}`
+                    description: `Next: ${nextCode}`,
+                    behaviorHints: {
+            defaultVideoId: `${imdbId}:${watched.season}:${nextEpisode}`
+        }
+   
                 });
             }
 
