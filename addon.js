@@ -14,9 +14,9 @@ const manifest = {
     idPrefixes: ["tt"],
     catalogs: [
         {
-            id: "mdblist-history",
+            id: "mdblist-complete-history",
             type: "series",
-            name: "History"
+            name: "Complete History"
         },
         {
             id: "mdblist-last-episode",
@@ -112,7 +112,7 @@ builder.defineCatalogHandler(async (args) => {
     console.log("================================================");
 
     if (
-        args.id !== "mdblist-history" &&
+        args.id !== "mdblist-complete-history" &&
         args.id !== "mdblist-last-episode" &&
         args.id !== "mdblist-next-episodes"
     ) {
@@ -195,7 +195,7 @@ builder.defineCatalogHandler(async (args) => {
         /* ==================================================
          * CATALOG: HISTORY
          * ================================================== */
-        if (args.id === "mdblist-history") {
+        if (args.id === "mmdblist-complete-history") {
             const metas = [];
 
             for (const item of first100) {
