@@ -291,7 +291,7 @@ builder.defineCatalogHandler(async (args) => {
                     releaseInfo: nextCode,
                     description: `Next: ${nextCode}`,
                     behaviorHints: {
-            defaultVideoId: `${imdbId}:${watched.season}:${nextEpisode}`
+            defaultVideoId: "tt0162065:3:19"
          
         }
 
