@@ -114,7 +114,7 @@ builder.defineMetaHandler(async ({ type, id }) => {
             type: "series",
             name: "Show Title",
             // ... standard meta properties
-            videos: [ ... ], // Array of episode objects
+            videos: [ ], // Array of episode objects
             behaviorHints: {
                 defaultVideoId: `${imdbId}:${season}:${episode}`
             }
