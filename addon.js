@@ -106,45 +106,20 @@ function getSeriesImdbId(showName) {
     });
 }
 // In your addon's /meta endpoint handler:
-builder.defineMetaHandler(async (args) => {
-    const { type, id, config } = args;
-    if (type !== "series") return { meta: {} };
-
-    const cleanId = id.split(":")[0]; // Base IMDb ID
-    const username = config && config.username ? config.username : "";
-    let defaultVideoId = null;
-
-    if (username) {
-        try {
-            const history = await fetchMDBListHistory(username);
-            
-            // Find most recent watched entry for this show
-            for (const item of history) {
-                const itemImdbId = await getSeriesImdbId(item.showName);
-                if (itemImdbId === cleanId) {
-                    const nextEpisode = item.episode + 1;
-                    defaultVideoId = `${cleanId}:${item.season}:${nextEpisode}`;
-                    break;
-                }
+builder.defineMetaHandler(async ({ type, id }) => {
+    // If the ID is queried, return the meta with defaultVideoId
+    return {
+        meta: {
+            id: imdbId,
+            type: "series",
+            name: "Show Title",
+            // ... standard meta properties
+            videos: [ ], // Array of episode objects
+            behaviorHints: {
+                defaultVideoId: `${imdbId}:${season}:${episode}`
             }
-        } catch (err) {
-            console.error("Meta handler error:", err);
         }
-    }
-
-    const meta = {
-        id: cleanId,
-        type: "series",
-        name: "Series Details"
     };
-
-    if (defaultVideoId) {
-        meta.behaviorHints = {
-            defaultVideoId: defaultVideoId
-        };
-    }
-
-    return { meta };
 });
 builder.defineCatalogHandler(async (args) => {
     console.log("\n================================================");
@@ -317,9 +292,12 @@ builder.defineCatalogHandler(async (args) => {
                     description: `Next: ${nextCode}`,
                     behaviorHints: {
             defaultVideoId: `${imdbId}:${watched.season}:${nextEpisode}`
+         
         }
+
    
                 });
+                   console.log (defaultVideoId);
             }
 
             return { metas, cacheMaxAge: 60 };
