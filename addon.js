@@ -268,6 +268,7 @@ builder.defineCatalogHandler(async (args) => {
         }
                     
                 });
+                console.log (metas);
             }
 
             return { metas, cacheMaxAge: 10 };
