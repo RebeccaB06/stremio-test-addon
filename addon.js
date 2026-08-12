@@ -9,7 +9,7 @@ const manifest = {
     version: "1.0.0",
     name: "MDBList History",
     description: "Shows your recently watched items from MDBList.",
-    resources: ["catalog"], // Declare only catalog so metadata falls back to Cinemeta
+    resources: ["catalog"], // Removed "meta" so metadata falls back to Cinemeta
     types: ["series"],
     idPrefixes: ["tt"],
     catalogs: [
