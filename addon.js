@@ -9,7 +9,23 @@ const manifest = {
     name: "MDBList History",
     description: "Shows your recently watched items from MDBList.",
 
-  resources: ["catalog"],
+  resources: ["catalog",    {
+      "name": "meta",
+      "types": [
+        "movie",
+        "series",
+        "anime"
+      ],
+      "idPrefixes": [
+        "kitsu-nsfw:",
+        "kitsu:",
+        "anilist:",
+        "mal:",
+        "tmdb:",
+        "tvdb:",
+        "simkl:"
+      ]
+    } ],
 
 
     types: ["series"],
