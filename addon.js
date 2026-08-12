@@ -114,10 +114,17 @@ builder.defineMetaHandler(async ({ type, id }) => {
             type: "series",
             name: "Show Title",
             // ... standard meta properties
-            videos: [ ], // Array of episode objects
             behaviorHints: {
                 defaultVideoId: `${imdbId}:${season}:${episode}`
-            }
+            },
+videos: [
+        {
+            id: `${imdbId}:${item.season}:${item.episode}`, // 'tt0162065:3:18'
+            title: item.episodeTitle,
+            season: Number(season),
+            episode: Number(episode)
+        }
+    ]
         }
     };
 });
@@ -255,7 +262,7 @@ builder.defineCatalogHandler(async (args) => {
                 if (!imdbId) continue;
 
                 metas.push({
-                   id: `${imdbId}:${item.season}:${item.episode}`, // 'tt0162065:3:18'
+                    id: imdbId,
                     type: "series",
                     name: item.showName,
                     poster: item.poster,
