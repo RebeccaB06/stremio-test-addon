@@ -668,7 +668,6 @@ builder.defineCatalogHandler(async (args) => {
                             item.watchedDate
                     });
 
-
                 } catch (error) {
 
                     console.error(
@@ -854,6 +853,8 @@ builder.defineCatalogHandler(async (args) => {
                 "Returning Last Episode items:",
                 metas.length
             );
+
+            console.log (metas);
 
 
             return {
