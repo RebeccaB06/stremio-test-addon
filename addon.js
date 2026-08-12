@@ -3,7 +3,7 @@ const {
     serveHTTP
 } = require("stremio-addon-sdk");
 const nameToImdb = require("name-to-imdb");
-
+ 
 const manifest = {
     id: "com.example.mdblist-history",
     version: "1.0.0",
