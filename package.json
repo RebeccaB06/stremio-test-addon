@@ -7,6 +7,7 @@
     "start": "node addon.js"
   },
   "dependencies": {
+    "name-to-imdb": "^3.0.5",
     "stremio-addon-sdk": "^1.6.10"
   }
 }
