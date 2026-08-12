@@ -10,7 +10,6 @@ const manifest = {
     description: "Shows your recently watched items from MDBList.",
 
   resources: ["catalog",    {
-      "name": "meta",
       "types": [
         "movie",
         "series",
