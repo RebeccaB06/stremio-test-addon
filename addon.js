@@ -3,7 +3,7 @@ const {
     serveHTTP
 } = require("stremio-addon-sdk");
 const nameToImdb = require("name-to-imdb");
- 
+
 const manifest = {
     id: "com.example.mdblist-history",
     version: "1.0.0",
@@ -255,7 +255,7 @@ builder.defineCatalogHandler(async (args) => {
                 if (!imdbId) continue;
 
                 metas.push({
-                    id: imdbId,
+                   id: `${imdbId}:${item.season}:${item.episode}`, // 'tt0162065:3:18'
                     type: "series",
                     name: item.showName,
                     poster: item.poster,
