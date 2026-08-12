@@ -1,7 +1,4 @@
-const {
-    addonBuilder,
-    serveHTTP
-} = require("stremio-addon-sdk");
+const { addonBuilder, serveHTTP } = require("stremio-addon-sdk");
 const nameToImdb = require("name-to-imdb");
 
 const manifest = {
@@ -13,151 +10,110 @@ const manifest = {
     types: ["series"],
     idPrefixes: ["tt"],
     catalogs: [
-        {
-            id: "mdblist-complete-history",
-            type: "series",
-            name: "Complete History"
-        },
-        {
-            id: "mdblist-last-episode",
-            type: "series",
-            name: "Last Episode of Show Watched"
-        },
-        {
-            id: "mdblist-next-episodes",
-            type: "series",
-            name: "Next Episodes"
-        }
+        { id: "mdblist-complete-history", type: "series", name: "Complete History" },
+        { id: "mdblist-last-episode", type: "series", name: "Last Episode of Show Watched" },
+        { id: "mdblist-next-episodes", type: "series", name: "Next Episodes" }
     ],
     config: [
-        {
-            key: "apiKey",
-            type: "password",
-            title: "MDBList API Key",
-            required: true
-        },
-        {
-            key: "username",
-            type: "text",
-            title: "MDBList Username",
-            required: true
-        }
+        { key: "apiKey", type: "password", title: "MDBList API Key", required: true },
+        { key: "username", type: "text", title: "MDBList Username", required: true }
     ],
-    behaviorHints: {
-        configurable: true,
-        configurationRequired: true
-    }
+    behaviorHints: { configurable: true, configurationRequired: true }
 };
 
 const builder = new addonBuilder(manifest);
 
-// In-memory cache to prevent redundant lookups
 const imdbCache = new Map();
 
-/**
- * Clean show name to guarantee only the main series title remains.
- */
+// Bridges the target episode from catalog execution over to the /meta request from Nuvio
+const defaultVideoMap = new Map();
+
 function cleanShowTitle(rawTitle) {
     if (!rawTitle) return "";
-
     return rawTitle
-        .replace(/<[^>]+>/g, "")             // Remove HTML tags
-        .replace(/&amp;/g, "&")               // Decode entities
+        .replace(/<[^>]+>/g, "")
+        .replace(/&amp;/g, "&")
         .replace(/&quot;/g, '"')
         .replace(/&#39;/g, "'")
-        .replace(/\s*S[0-9]+E[0-9]+.*$/i, "") // Strip S01E01 and anything after
-        .replace(/\s*Season\s*[0-9]+.*$/i, "")// Strip "Season X..."
-        .replace(/\s*\([0-9]{4}\)\s*$/g, "")  // Strip year like (2022) if needed
-        .replace(/\s+/g, " ")                 // Normalize spaces
+        .replace(/\s*S[0-9]+E[0-9]+.*$/i, "")
+        .replace(/\s*Season\s*[0-9]+.*$/i, "")
+        .replace(/\s*\([0-9]{4}\)\s*$/g, "")
+        .replace(/\s+/g, " ")
         .trim();
 }
 
-/**
- * Resolves ONLY the show title to its main series IMDb ID.
- */
 function getSeriesImdbId(showName) {
     const cleanTitle = cleanShowTitle(showName);
-    
-    if (!cleanTitle) {
-        console.log("❌ ERROR: Empty show title provided to getSeriesImdbId");
-        return Promise.resolve(null);
-    }
+    if (!cleanTitle) return Promise.resolve(null);
 
     const cacheKey = cleanTitle.toLowerCase();
-    if (imdbCache.has(cacheKey)) {
-        const cachedId = imdbCache.get(cacheKey);
-        console.log(`[CACHE HIT] Title: "${cleanTitle}" -> IMDb ID: ${cachedId}`);
-        return Promise.resolve(cachedId);
-    }
-
-    console.log(`🔍 [NAME-TO-IMDB LOOKUP] Searching for Series Title: "${cleanTitle}"`);
+    if (imdbCache.has(cacheKey)) return Promise.resolve(imdbCache.get(cacheKey));
 
     return new Promise((resolve) => {
         nameToImdb({ name: cleanTitle, type: "series" }, (err, res) => {
             if (err || !res) {
-                console.log(`❌ [NAME-TO-IMDB FAILED] Could not resolve IMDb ID for title: "${cleanTitle}"`);
                 resolve(null);
             } else {
-                console.log(`✅ [NAME-TO-IMDB SUCCESS] Title: "${cleanTitle}" -> IMDb ID: ${res}`);
                 imdbCache.set(cacheKey, res);
                 resolve(res);
             }
         });
     });
 }
-// In your addon's /meta endpoint handler:
-builder.defineMetaHandler(async ({ type, id, name, immdbID, season, episode }) => {
-    // If the ID is queried, return the meta with defaultVideoId
-    return {
-        meta: {
-            id: imdbId,
-            type: "series",
-            name: "Show Title",
-            // ... standard meta properties
-            behaviorHints: {
-                defaultVideoId: `${imdbId}:${season}:${episode}`
-            },
-videos: [
-        {
-            id: `${imdbId}:${item.season}:${item.episode}`, // 'tt0162065:3:18'
-            title: item.episodeTitle,
-            season: Number(season),
-            episode: Number(episode)
-        }
-    ]
-        }
+
+/* ==================================================
+ * META HANDLER
+ * Nuvio fetches this when the show card is tapped
+ * ================================================== */
+builder.defineMetaHandler(async ({ type, id }) => {
+    // id is the parent IMDb ID (e.g., "tt0162065")
+    const targetVideoId = defaultVideoMap.get(id);
+
+    const meta = {
+        id: id,
+        type: "series",
+        name: "Series Details"
     };
+
+    // Populate behaviorHints.defaultVideoId so Nuvio's details feature picks it up
+    if (targetVideoId) {
+        meta.behaviorHints = {
+            defaultVideoId: targetVideoId
+        };
+
+        const parts = targetVideoId.split(":");
+        if (parts.length === 3) {
+            meta.videos = [
+                {
+                    id: targetVideoId,
+                    season: Number(parts[1]),
+                    episode: Number(parts[2]),
+                    title: `Season ${parts[1]} Episode ${parts[2]}`
+                }
+            ];
+        }
+    }
+
+    return { meta };
 });
+
+/* ==================================================
+ * CATALOG HANDLER
+ * ================================================== */
 builder.defineCatalogHandler(async (args) => {
-    console.log("\n================================================");
-    console.log("CATALOG REQUEST:", JSON.stringify({ type: args.type, id: args.id }));
-    console.log("================================================");
-
-    if (
-        args.id !== "mdblist-complete-history" &&
-        args.id !== "mdblist-last-episode" &&
-        args.id !== "mdblist-next-episodes"
-    ) {
+    if (!["mdblist-complete-history", "mdblist-last-episode", "mdblist-next-episodes"].includes(args.id)) {
         return { metas: [] };
     }
 
-    const username = args.config && args.config.username ? args.config.username : "";
-
-    if (!username) {
-        console.log("ERROR: No MDBList username received.");
-        return { metas: [] };
-    }
+    const username = args.config?.username || "";
+    if (!username) return { metas: [] };
 
     const historyUrl = "https://mdblist.com/history/" + encodeURIComponent(username) + "?type=episode";
-    console.log("Fetching history from:", historyUrl);
 
     try {
         const response = await fetch(historyUrl);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const html = await response.text();
-
-        if (!response.ok) {
-            throw new Error(`MDBList returned HTTP ${response.status}`);
-        }
 
         const dayRegex = /<div class="day-group"[^>]*data-date="([^"]+)"[^>]*>([\s\S]*?)<\/div>\s*(?=<div class="day-group"|$)/gi;
         const history = [];
@@ -166,47 +122,31 @@ builder.defineCatalogHandler(async (args) => {
         while ((dayMatch = dayRegex.exec(html)) !== null) {
             const watchedDate = dayMatch[1];
             const dayHtml = dayMatch[2];
-
             const cardRegex = /<div class="activity-poster-card">([\s\S]*?)<\/div>\s*<\/div>/gi;
             let cardMatch;
 
             while ((cardMatch = cardRegex.exec(dayHtml)) !== null) {
                 const card = cardMatch[1];
-
                 const urlMatch = card.match(/href="(\/show\/[^"]+\/season\/[0-9]+\/episode\/[0-9]+)"/i);
                 if (!urlMatch) continue;
 
                 const posterMatch = card.match(/<img[^>]+src="([^"]+)"/i);
-                const poster = posterMatch ? posterMatch[1] : "";
-
                 const titleMatch = card.match(/<div class="activity-poster-card__title">\s*<a[^>]*>([\s\S]*?)<\/a>/i);
-                let rawTitle = titleMatch ? titleMatch[1] : "";
-
                 const episodeTitleMatch = card.match(/<div class="activity-poster-card__sub">\s*([\s\S]*?)\s*<\/div>/i);
-                let episodeTitle = episodeTitleMatch ? episodeTitleMatch[1] : "";
 
-                episodeTitle = episodeTitle
-                    .replace(/<[^>]+>/g, "")
-                    .replace(/&amp;/g, "&")
-                    .replace(/&quot;/g, '"')
-                    .replace(/&#39;/g, "'")
-                    .replace(/\s+/g, " ")
-                    .trim();
+                let rawTitle = titleMatch ? titleMatch[1] : "";
+                let episodeTitle = episodeTitleMatch ? episodeTitleMatch[1].replace(/<[^>]+>/g, "").trim() : "";
 
                 const episodeMatch = rawTitle.match(/\bS([0-9]+)E([0-9]+)\b/i);
                 if (!episodeMatch) continue;
 
-                // Extract show title cleanly
-                const showName = cleanShowTitle(rawTitle);
-
                 history.push({
-                    path: urlMatch[1],
-                    showName: showName,
+                    showName: cleanShowTitle(rawTitle),
                     episodeTitle: episodeTitle,
                     season: Number(episodeMatch[1]),
                     episode: Number(episodeMatch[2]),
-                    code: "S" + episodeMatch[1] + "E" + episodeMatch[2],
-                    poster: poster,
+                    code: `S${episodeMatch[1]}E${episodeMatch[2]}`,
+                    poster: posterMatch ? posterMatch[1] : "",
                     watchedDate: watchedDate
                 });
             }
@@ -214,16 +154,22 @@ builder.defineCatalogHandler(async (args) => {
 
         const first100 = history.slice(0, 100);
 
-        /* ==================================================
-         * CATALOG: HISTORY
-         * ================================================== */
+        const latestByShow = {};
+        for (const item of first100) {
+            const key = item.showName.toLowerCase().trim();
+            if (!latestByShow[key]) latestByShow[key] = item;
+        }
+        const latestEpisodes = Object.values(latestByShow);
+
+        /* Complete History */
         if (args.id === "mdblist-complete-history") {
             const metas = [];
-
             for (const item of first100) {
-                console.log(`\nProcessing History Item: ${item.showName} (${item.code})`);
                 const imdbId = await getSeriesImdbId(item.showName);
                 if (!imdbId) continue;
+
+                // Save target video ID so /meta can send defaultVideoId back to Nuvio
+                defaultVideoMap.set(imdbId, `${imdbId}:${item.season}:${item.episode}`);
 
                 metas.push({
                     id: imdbId,
@@ -235,31 +181,17 @@ builder.defineCatalogHandler(async (args) => {
                     description: `${item.episodeTitle} • Watched ${item.watchedDate}`
                 });
             }
-
             return { metas, cacheMaxAge: 10 };
         }
 
-        /* Deduplicate for latest episodes */
-        const latestByShow = {};
-        for (const item of first100) {
-            const showKey = item.showName.toLowerCase().trim();
-            if (!latestByShow[showKey]) {
-                latestByShow[showKey] = item;
-            }
-        }
-
-        const latestEpisodes = Object.values(latestByShow);
-
-        /* ==================================================
-         * CATALOG: LAST EPISODE OF SHOW WATCHED
-         * ================================================== */
+        /* Last Episode Watched */
         if (args.id === "mdblist-last-episode") {
             const metas = [];
-
             for (const item of latestEpisodes) {
-                console.log(`\nProcessing Last Episode Item: ${item.showName} (${item.code})`);
                 const imdbId = await getSeriesImdbId(item.showName);
                 if (!imdbId) continue;
+
+                defaultVideoMap.set(imdbId, `${imdbId}:${item.season}:${item.episode}`);
 
                 metas.push({
                     id: imdbId,
@@ -268,40 +200,23 @@ builder.defineCatalogHandler(async (args) => {
                     poster: item.poster,
                     posterShape: "poster",
                     releaseInfo: item.code,
-                    description: `${item.episodeTitle} • Watched ${item.watchedDate}`,
-                   behaviorHints: {
-            defaultVideoId: `${imdbId}:${item.season}:${item.episode}`
-         
-        },
-        videos: [
-        {
-            id: `${imdbId}:${item.season}:${item.episode}`, // 'tt0162065:3:18'
-            title: item.episodeTitle,
-            season: Number(item.season),
-            episode: Number(item.episode)
-        }
-    ]
-                    
+                    description: `${item.episodeTitle} • Watched ${item.watchedDate}`
                 });
-                console.log (metas);
             }
-
             return { metas, cacheMaxAge: 10 };
         }
 
-        /* ==================================================
-         * CATALOG: NEXT EPISODES
-         * ================================================== */
+        /* Next Episodes */
         if (args.id === "mdblist-next-episodes") {
             const metas = [];
-
             for (const watched of latestEpisodes) {
-                console.log(`\nProcessing Next Episode Item: ${watched.showName}`);
                 const imdbId = await getSeriesImdbId(watched.showName);
                 if (!imdbId) continue;
 
-                const nextEpisode = watched.episode + 1;
-                const nextCode = `S${watched.season}E${nextEpisode}`;
+                const nextEp = watched.episode + 1;
+                const nextCode = `S${watched.season}E${nextEp}`;
+
+                defaultVideoMap.set(imdbId, `${imdbId}:${watched.season}:${nextEp}`);
 
                 metas.push({
                     id: imdbId,
@@ -310,22 +225,13 @@ builder.defineCatalogHandler(async (args) => {
                     poster: watched.poster,
                     posterShape: "poster",
                     releaseInfo: nextCode,
-                    description: `Next: ${nextCode}`,
-                    behaviorHints: {
-            defaultVideoId: `${imdbId}:${watched.season}:${nextEpisode}`
-         
-        }
-
-   
+                    description: `Next: ${nextCode}`
                 });
-                   console.log ( `${imdbId}:${watched.season}:${nextEpisode}`);
             }
-
             return { metas, cacheMaxAge: 10 };
         }
 
         return { metas: [] };
-
     } catch (error) {
         console.error("MDBList History error:", error);
         return { metas: [] };
