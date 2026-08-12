@@ -106,68 +106,45 @@ function getSeriesImdbId(showName) {
     });
 }
 // In your addon's /meta endpoint handler:
-builder.defineMetaHandler(async ({ type, id, config }) => {
-    // 1. Ensure type is series and id is a valid IMDb ID
-    if (type !== "series" || !id.startsWith("tt")) {
-        return { meta: {} };
-    }
+builder.defineMetaHandler(async (args) => {
+    const { type, id, config } = args;
+    if (type !== "series") return { meta: {} };
 
+    const cleanId = id.split(":")[0]; // Base IMDb ID
     const username = config && config.username ? config.username : "";
-    
-    // Fallback basic metadata structure
     let defaultVideoId = null;
 
     if (username) {
         try {
-            // Fetch user history to check what episode they are on for this show
-            const historyUrl = "https://mdblist.com/history/" + encodeURIComponent(username) + "?type=episode";
-            const response = await fetch(historyUrl);
-            const html = await response.text();
-
-            // Match episode entries from HTML
-            const cardRegex = /<div class="activity-poster-card">([\s\S]*?)<\/div>\s*<\/div>/gi;
-            let cardMatch;
-
-            while ((cardMatch = cardRegex.exec(html)) !== null) {
-                const card = cardMatch[1];
-                const titleMatch = card.match(/<div class="activity-poster-card__title">\s*<a[^>]*>([\s\S]*?)<\/a>/i);
-                let rawTitle = titleMatch ? titleMatch[1] : "";
-                
-                const showName = cleanShowTitle(rawTitle);
-                const resolvedImdbId = await getSeriesImdbId(showName);
-
-                // If this history entry matches the requested show ID
-                if (resolvedImdbId === id) {
-                    const episodeMatch = rawTitle.match(/\bS([0-9]+)E([0-9]+)\b/i);
-                    if (episodeMatch) {
-                        const season = Number(episodeMatch[1]);
-                        const nextEpisode = Number(episodeMatch[2]) + 1; // Target next episode
-                        
-                        defaultVideoId = `${id}:${season}:${nextEpisode}`;
-                        break; // Stop after finding the most recent entry
-                    }
+            const history = await fetchMDBListHistory(username);
+            
+            // Find most recent watched entry for this show
+            for (const item of history) {
+                const itemImdbId = await getSeriesImdbId(item.showName);
+                if (itemImdbId === cleanId) {
+                    const nextEpisode = item.episode + 1;
+                    defaultVideoId = `${cleanId}:${item.season}:${nextEpisode}`;
+                    break;
                 }
             }
         } catch (err) {
-            console.error("Error fetching history for meta handler:", err);
+            console.error("Meta handler error:", err);
         }
     }
 
-    // 2. Return Meta object formatted for both Stremio and Nuvio
-    const metaResponse = {
-        id: id,
+    const meta = {
+        id: cleanId,
         type: "series",
-        name: "Series Meta", // Standard meta attributes will be augmented by Cinemeta/TMDB by clients
+        name: "Series Details"
     };
 
-    // If we resolved the next episode ID, attach behaviorHints here
     if (defaultVideoId) {
-        metaResponse.behaviorHints = {
+        meta.behaviorHints = {
             defaultVideoId: defaultVideoId
         };
     }
 
-    return { meta: metaResponse };
+    return { meta };
 });
 builder.defineCatalogHandler(async (args) => {
     console.log("\n================================================");
