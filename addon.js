@@ -107,26 +107,20 @@ function getSeriesImdbId(showName) {
 }
 // In your addon's /meta endpoint handler:
 builder.defineMetaHandler(async ({ type, id }) => {
-    // If the ID is queried, return the meta with defaultVideoId
-    return {
-        meta: {
-            id: imdbId,
-            type: "series",
-            name: "Show Title",
-            // ... standard meta properties
-            behaviorHints: {
-                defaultVideoId: `${imdbId}:${season}:${episode}`
-            },
-videos: [
-        {
-            id: `${imdbId}:${item.season}:${item.episode}`, // 'tt0162065:3:18'
-            title: item.episodeTitle,
-            season: Number(season),
-            episode: Number(episode)
-        }
-    ]
-        }
-    };
+    // 1. Fetch official full metadata from Cinemeta
+    const res = await fetch(`https://v3-cinemeta.strem.fun/meta/${type}/${id}.json`);
+    const { meta } = await res.json();
+
+    if (meta) {
+        // 2. Inject your specific episode target into behaviorHints
+        meta.behaviorHints = {
+            ...meta.behaviorHints,
+            defaultVideoId: `${id}:${userWatchedSeason}:${userWatchedEpisode}` // e.g. tt0162065:3:18
+        };
+    }
+
+    // 3. Return the full Cinemeta show details + your defaultVideoId
+    return { meta };
 });
 builder.defineCatalogHandler(async (args) => {
     console.log("\n================================================");
