@@ -297,7 +297,7 @@ builder.defineCatalogHandler(async (args) => {
 
    
                 });
-                   console.log (defaultVideoId);
+                   console.log ( `${imdbId}:${watched.season}:${nextEpisode}`);
             }
 
             return { metas, cacheMaxAge: 60 };
