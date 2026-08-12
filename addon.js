@@ -210,7 +210,10 @@ builder.defineCatalogHandler(async (args) => {
                     poster: item.poster,
                     posterShape: "poster",
                     releaseInfo: item.code,
-                    description: `${item.episodeTitle} • Watched ${item.watchedDate}`
+                    description: `${item.episodeTitle} • Watched ${item.watchedDate}`,
+                    behaviorHints: {
+            defaultVideoId: `${imdbId}:${watched.season}:${watched.episode}`
+        }
                 });
             }
 
@@ -246,7 +249,10 @@ builder.defineCatalogHandler(async (args) => {
                     poster: item.poster,
                     posterShape: "poster",
                     releaseInfo: item.code,
-                    description: `${item.episodeTitle} • Watched ${item.watchedDate}`
+                    description: `${item.episodeTitle} • Watched ${item.watchedDate}`,
+                    behaviorHints: {
+            defaultVideoId: `${imdbId}:${watched.season}:${watched.episode}`
+        }
                 });
             }
 
