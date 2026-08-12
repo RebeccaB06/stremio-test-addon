@@ -265,7 +265,15 @@ builder.defineCatalogHandler(async (args) => {
                    behaviorHints: {
             defaultVideoId: `${imdbId}:${item.season}:${item.episode}`
          
+        },
+        videos: [
+        {
+            id: `${imdbId}:${item.season}:${item.episode}`, // 'tt0162065:3:18'
+            title: item.episodeTitle,
+            season: Number(item.season),
+            episode: Number(item.episode)
         }
+    ]
                     
                 });
                 console.log (metas);
