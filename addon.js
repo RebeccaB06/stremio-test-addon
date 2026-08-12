@@ -9,7 +9,7 @@ const manifest = {
     version: "1.0.0",
     name: "MDBList History",
     description: "Shows your recently watched items from MDBList.",
-    resources: ["catalog"], // Removed "meta" so metadata falls back to Cinemeta
+    resources: ["catalog", "meta"],
     types: ["series"],
     idPrefixes: ["tt"],
     catalogs: [
@@ -51,8 +51,9 @@ const manifest = {
 
 const builder = new addonBuilder(manifest);
 
-// In-memory cache to prevent redundant lookups
+// In-memory caches
 const imdbCache = new Map();
+const episodeCache = new Map();
 
 /**
  * Clean show name to guarantee only the main series title remains.
@@ -105,6 +106,30 @@ function getSeriesImdbId(showName) {
         });
     });
 }
+
+/**
+ * Safe Meta Handler
+ * Provides defaultVideoId mapping to prevent crashes while letting Cinemeta load episodes
+ */
+builder.defineMetaHandler(async ({ type, id }) => {
+    console.log(`META REQUEST: Fetching details for ${id}`);
+    
+    const cached = episodeCache.get(id);
+    if (!cached) {
+        return { meta: null };
+    }
+
+    return {
+        meta: {
+            id: id,
+            type: "series",
+            name: cached.name,
+            behaviorHints: {
+                defaultVideoId: `${id}:${cached.season}:${cached.episode}`
+            }
+        }
+    };
+});
 
 builder.defineCatalogHandler(async (args) => {
     console.log("\n================================================");
@@ -202,6 +227,12 @@ builder.defineCatalogHandler(async (args) => {
                 const imdbId = await getSeriesImdbId(item.showName);
                 if (!imdbId) continue;
 
+                episodeCache.set(imdbId, {
+                    name: item.showName,
+                    season: item.season,
+                    episode: item.episode
+                });
+
                 metas.push({
                     id: imdbId,
                     type: "series",
@@ -241,6 +272,12 @@ builder.defineCatalogHandler(async (args) => {
                 const imdbId = await getSeriesImdbId(item.showName);
                 if (!imdbId) continue;
 
+                episodeCache.set(imdbId, {
+                    name: item.showName,
+                    season: item.season,
+                    episode: item.episode
+                });
+
                 metas.push({
                     id: imdbId,
                     type: "series",
@@ -271,6 +308,12 @@ builder.defineCatalogHandler(async (args) => {
 
                 const nextEpisode = watched.episode + 1;
                 const nextCode = `S${watched.season}E${nextEpisode}`;
+
+                episodeCache.set(imdbId, {
+                    name: watched.showName,
+                    season: watched.season,
+                    episode: nextEpisode
+                });
 
                 metas.push({
                     id: imdbId,
