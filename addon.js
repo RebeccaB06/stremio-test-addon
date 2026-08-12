@@ -9,7 +9,7 @@ const manifest = {
     version: "1.0.0",
     name: "MDBList History",
     description: "Shows your recently watched items from MDBList.",
-    resources: ["catalog"],
+    resources: ["catalog", "meta"],
     types: ["series"],
     idPrefixes: ["tt"],
     catalogs: [
@@ -105,7 +105,22 @@ function getSeriesImdbId(showName) {
         });
     });
 }
-
+// In your addon's /meta endpoint handler:
+builder.defineMetaHandler(async ({ type, id }) => {
+    // If the ID is queried, return the meta with defaultVideoId
+    return {
+        meta: {
+            id: imdbId,
+            type: "series",
+            name: "Show Title",
+            // ... standard meta properties
+            videos: [ ... ], // Array of episode objects
+            behaviorHints: {
+                defaultVideoId: `${imdbId}:${season}:${episode}`
+            }
+        }
+    };
+});
 builder.defineCatalogHandler(async (args) => {
     console.log("\n================================================");
     console.log("CATALOG REQUEST:", JSON.stringify({ type: args.type, id: args.id }));
@@ -246,11 +261,7 @@ builder.defineCatalogHandler(async (args) => {
                     poster: item.poster,
                     posterShape: "poster",
                     releaseInfo: item.code,
-                    description: `${item.episodeTitle} • Watched ${item.watchedDate}`,
-                    behaviorHints: {
-            defaultVideoId: `${imdbId}:${watched.season}:${next.episode}`
-        }
-                    
+                    description: `${item.episodeTitle} • Watched ${item.watchedDate}`
                 });
             }
 
