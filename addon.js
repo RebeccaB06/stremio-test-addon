@@ -51,11 +51,14 @@ const manifest = {
 
 const builder = new addonBuilder(manifest);
 
-// In-memory cache to prevent redundant lookups
+// In-memory cache to prevent redundant title-to-IMDb lookups
 const imdbCache = new Map();
 
 // In-memory cache to map IMDb ID to the target episode details for the Meta Handler
 const showEpisodeCache = new Map();
+
+// In-memory cache to store fetched Cinemeta payloads to avoid rate-limiting/high latency
+const cinemetaCache = new Map();
 
 /**
  * Clean show name to guarantee only the main series title remains.
@@ -73,6 +76,35 @@ function cleanShowTitle(rawTitle) {
         .replace(/\s*\([0-9]{4}\)\s*$/g, "")  // Strip year like (2022) if needed
         .replace(/\s+/g, " ")                 // Normalize spaces
         .trim();
+}
+
+/**
+ * Helper to cache Cinemeta metadata and avoid memory leaks.
+ */
+function cacheCinemetaMeta(id, meta) {
+    if (cinemetaCache.size >= 100) {
+        const firstKey = cinemetaCache.keys().next().value;
+        cinemetaCache.delete(firstKey);
+    }
+    cinemetaCache.set(id, meta);
+}
+
+/**
+ * Fetches the complete metadata object from Cinemeta to capture the official 'videos' list.
+ */
+async function getCinemetaMeta(id) {
+    const url = `https://v3-cinemeta.strem.io/meta/series/${encodeURIComponent(id)}.json`;
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Cinemeta returned HTTP ${response.status}`);
+        }
+        const data = await response.json();
+        return data && data.meta ? data.meta : null;
+    } catch (error) {
+        console.error(`❌ Error fetching Cinemeta meta for ${id}:`, error);
+        return null;
+    }
 }
 
 /**
@@ -110,14 +142,18 @@ function getSeriesImdbId(showName) {
 }
 
 /**
- * Fixed Meta Handler:
- * Returns standard show metadata mapping back to the parent without a custom 'videos' list.
- * This preserves standard Cinemeta episodes while feeding defaultVideoId to Nuvio's detail player.
+ * Hybrid Meta Handler:
+ * Dynamically grabs standard Cinemeta details (including full videos lists)
+ * and appends the target defaultVideoId to satisfy Stremio and Nuvio clients simultaneously.
  */
 builder.defineMetaHandler(async ({ type, id }) => {
     console.log(`\n================================================`);
     console.log(`META REQUEST: Fetching details for ${id}`);
     console.log(`================================================`);
+
+    if (type !== "series") {
+        return { meta: null };
+    }
 
     const cached = showEpisodeCache.get(id);
     if (!cached) {
@@ -127,19 +163,45 @@ builder.defineMetaHandler(async ({ type, id }) => {
 
     console.log(`[META CACHE HIT] Mapping ${id} to ${cached.showName} S${cached.season}E${cached.episode}`);
 
-    return {
-        meta: {
-            id: id,
-            type: "series",
-            name: cached.showName,
-            behaviorHints: {
-                // Pre-selects this exact episode on Nuvio and Stremio details page
-                defaultVideoId: `${id}:${cached.season}:${cached.episode}`
-            }
-            // Note: We omit the 'videos' array here. This ensures Cinemeta's 
-            // complete seasons & episodes list loads on the parent show page.
+    // Attempt to pull official, complete metadata from Cinemeta
+    let meta = null;
+    if (cinemetaCache.has(id)) {
+        console.log(`[CINEMETA CACHE HIT] ID: ${id}`);
+        meta = JSON.parse(JSON.stringify(cinemetaCache.get(id))); // Deep clone to avoid mutating cache
+    } else {
+        console.log(`🔍 [CINEMETA API FETCH] ID: ${id}`);
+        const fetchedMeta = await getCinemetaMeta(id);
+        if (fetchedMeta) {
+            cacheCinemetaMeta(id, fetchedMeta);
+            meta = JSON.parse(JSON.stringify(fetchedMeta));
         }
-    };
+    }
+
+    const targetVideoId = `${id}:${cached.season}:${cached.episode}`;
+
+    if (meta) {
+        // We inject our targeted defaultVideoId into the Cinemeta metadata.
+        // This ensures both Stremio and Nuvio see the full video list as well as the target episode.
+        meta.behaviorHints = {
+            ...meta.behaviorHints,
+            defaultVideoId: targetVideoId
+        };
+        console.log(`✅ Returning full Cinemeta metadata with custom defaultVideoId: ${targetVideoId}`);
+        return { meta };
+    } else {
+        // Fallback to basic metadata shell if Cinemeta is unreachable
+        console.log(`⚠️ Falling back to basic metadata structure`);
+        return {
+            meta: {
+                id: id,
+                type: "series",
+                name: cached.showName,
+                behaviorHints: {
+                    defaultVideoId: targetVideoId
+                }
+            }
+        };
+    }
 });
 
 builder.defineCatalogHandler(async (args) => {
